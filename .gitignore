@@ -1,0 +1,12 @@
+bin/
+obj/
+*.pdb
+*.user
+*.suo
+.vs/
+*.log
+
+# esportazioni di prova: sono dati di progetti altrui, non finiscono nel repo
+export/
+out/
+tmp/
