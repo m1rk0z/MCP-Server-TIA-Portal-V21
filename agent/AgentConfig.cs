@@ -45,6 +45,9 @@ namespace TiaAgent
         /// <summary>Una sessione senza richieste per questo tempo viene chiusa (il server TIA esce e rilascia Openness).</summary>
         public int SessionIdleMinutes = 720;
 
+        /// <summary>Una sessione con keepalive senza ping del client per questo tempo e abbandonata e viene chiusa.</summary>
+        public int KeepAliveSeconds = 180;
+
         public bool IsReadWrite { get { return string.Equals(AccessMode, "read-write", StringComparison.OrdinalIgnoreCase); } }
 
         static string DataDirectory()
@@ -81,6 +84,7 @@ namespace TiaAgent
             c.AllowedClients = o.Strings("AllowedClients");
             c.WorkDir = o.Str("WorkDir", c.WorkDir);
             c.SessionIdleMinutes = o.Int("SessionIdleMinutes", 720);
+            c.KeepAliveSeconds = Math.Max(5, o.Int("KeepAliveSeconds", 180));
             return c;
         }
 
@@ -94,7 +98,8 @@ namespace TiaAgent
                 .Set("AccessMode", AccessMode)
                 .Set("AllowedClients", AllowedClients)
                 .Set("WorkDir", WorkDir)
-                .Set("SessionIdleMinutes", SessionIdleMinutes);
+                .Set("SessionIdleMinutes", SessionIdleMinutes)
+                .Set("KeepAliveSeconds", KeepAliveSeconds);
             File.WriteAllText(ConfigPath, Json.Write(o), new UTF8Encoding(false));
         }
 

@@ -33,16 +33,23 @@ namespace TiaAgent
         public string WorkDir { get; private set; }
         public DateTime LastUsed { get; private set; }
         public DateTime Started { get; private set; }
+        /// <summary>Il client manda un ping periodico: se smette (processo chiuso a forza), la sessione si chiude.</summary>
+        public bool KeepAlive { get; private set; }
+        DateTime lastSeen;
+        public DateTime LastSeen { get { lock (seenLock) return lastSeen; } }
+        readonly object seenLock = new object();
+        public void Touch() { lock (seenLock) lastSeen = DateTime.Now; }
         public bool Exited { get { try { return process.HasExited; } catch { return true; } } }
 
-        public Session(string id, string version, string exe, bool readOnly, string workRoot, string client)
+        public Session(string id, string version, string exe, bool readOnly, string workRoot, string client, bool keepAlive)
         {
             Id = id;
+            KeepAlive = keepAlive;
             Version = version;
             Client = client;
             WorkDir = Path.Combine(workRoot, id);
             Directory.CreateDirectory(WorkDir);
-            Started = LastUsed = DateTime.Now;
+            Started = LastUsed = lastSeen = DateTime.Now;
 
             Directory.CreateDirectory(AgentConfig.LogDir);
             log = new StreamWriter(Path.Combine(AgentConfig.LogDir, "server-" + id + ".log"), true, new UTF8Encoding(false));
@@ -66,7 +73,7 @@ namespace TiaAgent
             reader.Start();
             process.ErrorDataReceived += delegate(object s, DataReceivedEventArgs e) { if (e.Data != null) Log(e.Data); };
             process.BeginErrorReadLine();
-            Log("started " + exe + (readOnly ? " --read-only" : "") + " for " + client);
+            Log("started " + exe + (readOnly ? " --read-only" : "") + " for " + client + (keepAlive ? ", keepalive" : ""));
         }
 
         void ReadOutput()
@@ -96,6 +103,7 @@ namespace TiaAgent
             bool notification = !m.Has("id") || m.Get("id") == null;
             string method = m.Str("method", "?");
 
+            Touch();
             lock (callLock)
             {
                 LastUsed = DateTime.Now;
@@ -111,6 +119,7 @@ namespace TiaAgent
                     throw new TimeoutException("Nessuna risposta dal server TIA a '" + method + "' entro " + (int)timeout.TotalMinutes + " minuti.");
                 }
                 LastUsed = DateTime.Now;
+                Touch();
                 return reply;
             }
         }
@@ -139,12 +148,14 @@ namespace TiaAgent
         {
             this.config = config;
             Directory.CreateDirectory(config.WorkDir);
-            reaper = new Timer(delegate { Reap(); }, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
+            // controllo frequente: una sessione abbandonata va chiusa entro poco piu di KeepAliveSeconds
+            var every = TimeSpan.FromSeconds(Math.Min(30, Math.Max(1, config.KeepAliveSeconds / 3)));
+            reaper = new Timer(delegate { Reap(); }, null, every, every);
         }
 
         public IEnumerable<Session> All { get { return sessions.Values; } }
 
-        public Session Create(string version, string client)
+        public Session Create(string version, string client, bool keepAlive)
         {
             var servers = AgentConfig.Servers();
             string key = (version ?? "").Trim().ToUpperInvariant();
@@ -154,9 +165,9 @@ namespace TiaAgent
                 throw new ArgumentException("TIA Portal " + version + " non disponibile su questa macchina. Disponibili: " +
                                             (servers.Count == 0 ? "nessuno" : string.Join(", ", servers.Keys)));
             string id = Guid.NewGuid().ToString("N").Substring(0, 12);
-            var s = new Session(id, key, exe, !config.IsReadWrite, config.WorkDir, client);
+            var s = new Session(id, key, exe, !config.IsReadWrite, config.WorkDir, client, keepAlive);
             sessions[id] = s;
-            AgentLog.Write("session " + id + " " + key + " opened by " + client);
+            AgentLog.Write("session " + id + " " + key + " opened by " + client + (keepAlive ? " (keepalive)" : ""));
             return s;
         }
 
@@ -181,9 +192,13 @@ namespace TiaAgent
         {
             foreach (Session s in sessions.Values.ToList())
             {
-                if (s.Exited || DateTime.Now - s.LastUsed > TimeSpan.FromMinutes(config.SessionIdleMinutes))
+                string why = null;
+                if (s.Exited) why = "server exited";
+                else if (s.KeepAlive && DateTime.Now - s.LastSeen > TimeSpan.FromSeconds(config.KeepAliveSeconds)) why = "client gone (no ping)";
+                else if (DateTime.Now - s.LastUsed > TimeSpan.FromMinutes(config.SessionIdleMinutes)) why = "idle";
+                if (why != null)
                 {
-                    AgentLog.Write("session " + s.Id + (s.Exited ? " server exited" : " idle") + ": closing");
+                    AgentLog.Write("session " + s.Id + " " + why + ": closing");
                     Close(s.Id);
                 }
             }

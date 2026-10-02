@@ -97,11 +97,19 @@ Every request carries `Authorization: Bearer <token>`.
 | `GET /api/health` | machine, versions available, TIA instances, open sessions |
 | `POST /api/sessions` `{"version":"V21"}` | starts a server → `{session, work_dir}` |
 | `POST /api/sessions/{id}/rpc` | one JSON-RPC message → the server's reply (204 for a notification) |
+| `POST /api/sessions/{id}/ping` | the client is alive (sent every minute) |
 | `DELETE /api/sessions/{id}` | stops the server, which releases Openness |
 | `PUT /api/sessions/{id}/upload?name=` | file into the session folder |
 | `GET /api/sessions/{id}/list?dir=` · `/file?path=` | listing / download, confined to the session folder |
 
 Idle sessions are closed after 12 hours (`SessionIdleMinutes` in `agent.json`).
+
+The client pings its session every minute. When the ping stops for 3 minutes
+(`KeepAliveSeconds`), the agent closes the session. This happens when the client was
+killed without closing stdin, which is how MCP hosts often stop their servers. Without
+the ping, every restart of Claude Code would leave a `TiaMcpServer` running on the VM
+for 12 hours. Sessions opened by clients older than 1.1.1 are not pinged and keep the
+old rule.
 
 ## Security
 

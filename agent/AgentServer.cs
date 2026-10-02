@@ -3,6 +3,8 @@
 //   GET    /api/health                               macchina, versioni TIA disponibili, istanze aperte, sessioni
 //   POST   /api/sessions            {"version":"V21"}  apre una sessione (un processo TiaMcpServer) -> {"session","work_dir"}
 //   POST   /api/sessions/{id}/rpc   <messaggio JSON-RPC> -> la risposta del server TIA (204 per una notifica)
+//   POST   /api/sessions/{id}/ping                    il client e vivo (con "keepalive":true all'apertura,
+//                                                     senza ping per 3 minuti la sessione si chiude)
 //   DELETE /api/sessions/{id}                         chiude la sessione: il server rilascia Openness
 //   PUT    /api/sessions/{id}/upload?name=<rel>       carica un file nella cartella della sessione -> {"path"}
 //   GET    /api/sessions/{id}/list?dir=<path>         file sotto una cartella della sessione (percorsi relativi)
@@ -84,6 +86,7 @@ namespace TiaAgent
             string method = ctx.Request.HttpMethod;
             string what = path;
             string outcome = "?";
+            bool quiet = false;
             try
             {
                 if (config.AllowedClients.Count > 0 && (remote == null || !config.AllowedClients.Contains(Normalize(remote))))
@@ -110,7 +113,7 @@ namespace TiaAgent
                 else if (method == "POST" && path == "/api/sessions")
                 {
                     JObj body = ReadJson(ctx.Request, 64 * 1024);
-                    Session s = sessions.Create(body.Str("version"), Normalize(remote));
+                    Session s = sessions.Create(body.Str("version"), Normalize(remote), body.Bool("keepalive", false));
                     what += " " + s.Version + " -> " + s.Id;
                     Reply(ctx, 200, Ok(new JObj().Set("session", s.Id).Set("version", s.Version).Set("work_dir", s.WorkDir)
                                                   .Set("access_mode", config.AccessMode)));
@@ -120,7 +123,15 @@ namespace TiaAgent
                 {
                     Session s = sessions.Get(parts[2]);
                     string action = parts.Length > 3 ? parts[3] : "";
-                    if (method == "DELETE" && action == "")
+                    if (method == "POST" && action == "ping")
+                    {
+                        s.Touch();
+                        Reply(ctx, 200, Ok(new JObj().Set("session", s.Id)));
+                        outcome = "ok";
+                        quiet = true; // il ping arriva ogni minuto: non va nel log
+                        return;
+                    }
+                    else if (method == "DELETE" && action == "")
                     {
                         sessions.Close(s.Id);
                         Reply(ctx, 200, Ok(new JObj().Set("closed", s.Id)));
@@ -176,7 +187,7 @@ namespace TiaAgent
             catch (Exception ex) { outcome = "failed: " + ex.Message; TryReply(ctx, 400, Fail(ex.Message)); }
             finally
             {
-                AgentLog.Write(Normalize(remote) + " " + method + " " + what + " -> " + outcome + " (" + sw.ElapsedMilliseconds + " ms)");
+                if (!quiet) AgentLog.Write(Normalize(remote) + " " + method + " " + what + " -> " + outcome + " (" + sw.ElapsedMilliseconds + " ms)");
             }
         }
 
