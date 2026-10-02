@@ -32,7 +32,7 @@ if ($LASTEXITCODE -ne 0) { throw 'compilazione del finto server fallita' }
 
 $data = Join-Path $work 'data'
 New-Item -ItemType Directory $data | Out-Null
-@{ Port = $port; ListenHost = 'localhost'; Token = $token; AccessMode = 'read-only'; AllowedClients = @(); WorkDir = (Join-Path $data 'work') } |
+@{ Port = $port; ListenHost = 'localhost'; Token = $token; AccessMode = 'read-only'; AllowedClients = @(); WorkDir = (Join-Path $data 'work'); KeepAliveSeconds = 6 } |
     ConvertTo-Json | Set-Content (Join-Path $data 'agent.json') -Encoding utf8
 $env:TIA_AGENT_DATA = $data
 $agent = Start-Process (Join-Path $agentDir 'TiaAgent.exe') -PassThru
@@ -105,6 +105,29 @@ try {
     Check 'sessione chiusa alla fine del client' (@($health.result.sessions).Count -eq 0) ($health.result.sessions | ConvertTo-Json)
     Check 'processo del server terminato' (-not (Get-Process -Id $info.pid -ErrorAction SilentlyContinue)) $info.pid
     Check 'cartella della sessione eliminata' (-not (Test-Path $info.cwd)) $info.cwd
+
+    Write-Host "== keepalive (client chiuso a forza, come fa Claude Code)"
+    $psi.EnvironmentVariables['TIA_MCP_PING_SECONDS'] = '2'
+    $client = [Diagnostics.Process]::Start($psi)
+    function Call($r) {
+        $client.StandardInput.WriteLine(($r | ConvertTo-Json -Depth 10 -Compress)); $client.StandardInput.Flush()
+        $client.StandardOutput.ReadLine() | ConvertFrom-Json
+    }
+    $first = Call @{ jsonrpc = '2.0'; id = 1; method = 'tools/call'; params = @{ name = 'fake_info'; arguments = @{} } }
+    $info = $first.result.content[0].text | ConvertFrom-Json
+    Start-Sleep 10   # oltre KeepAliveSeconds (6): resta viva solo grazie ai ping
+    $again = Call @{ jsonrpc = '2.0'; id = 2; method = 'tools/call'; params = @{ name = 'fake_info'; arguments = @{} } }
+    $info2 = $again.result.content[0].text | ConvertFrom-Json
+    Check 'sessione viva con i ping, oltre il timeout' ($info2.pid -eq $info.pid) "$($info.pid) -> $($info2.pid)"
+    $client.Kill()   # niente EOF su stdin: il client non chiude la sessione
+    $client.WaitForExit(5000) | Out-Null
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep 1
+        $health = Invoke-RestMethod "http://localhost:$port/api/health" -Headers $h
+        if (@($health.result.sessions).Count -eq 0) { break }
+    }
+    Check 'sessione abbandonata chiusa dall agente' (@($health.result.sessions).Count -eq 0) ($health.result.sessions | ConvertTo-Json)
+    Check 'server della sessione abbandonata terminato' (-not (Get-Process -Id $info.pid -ErrorAction SilentlyContinue)) $info.pid
 }
 finally {
     Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue

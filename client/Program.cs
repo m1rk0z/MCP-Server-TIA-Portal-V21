@@ -29,8 +29,12 @@ namespace TiaMcpClient
     {
         static string agentUrl, token, version, localRoot;
         static TimeSpan timeout = TimeSpan.FromMinutes(30);
-        static string sessionId, sessionWorkDir;
+        static volatile string sessionId;
+        static string sessionWorkDir;
         static int counter;
+        // TIA_MCP_PING_SECONDS solo per le prove: l'agente chiude una sessione dopo 3 minuti senza ping
+        static readonly TimeSpan PingInterval = TimeSpan.FromSeconds(PingSeconds());
+        static System.Threading.Timer pinger;
 
         static int Main(string[] args)
         {
@@ -42,6 +46,8 @@ namespace TiaMcpClient
                 return 2;
             }
             ServicePointManager.Expect100Continue = false;
+            // una chiamata lunga (compilazione) e il ping viaggiano insieme
+            ServicePointManager.DefaultConnectionLimit = 8;
 
             var utf8 = new UTF8Encoding(false);
             var input = new StreamReader(Console.OpenStandardInput(), utf8);
@@ -242,10 +248,29 @@ namespace TiaMcpClient
         static void EnsureSession()
         {
             if (sessionId != null) return;
-            JObj r = Envelope(Send("POST", "/api/sessions", Encoding.UTF8.GetBytes(Json.Write(new JObj().Set("version", version))), "application/json"));
-            sessionId = r.Str("session");
+            // keepalive: se questo processo viene chiuso a forza (senza EOF su stdin), i ping si
+            // fermano e l'agente chiude la sessione da solo invece di tenerla aperta per ore.
+            JObj r = Envelope(Send("POST", "/api/sessions", Encoding.UTF8.GetBytes(Json.Write(
+                new JObj().Set("version", version).Set("keepalive", true))), "application/json"));
             sessionWorkDir = r.Str("work_dir");
+            sessionId = r.Str("session");
             Log("sessione " + sessionId + " (" + r.Str("version") + ", " + r.Str("access_mode") + ") aperta su " + agentUrl);
+            if (pinger == null) pinger = new System.Threading.Timer(delegate { Ping(); }, null, PingInterval, PingInterval);
+        }
+
+        static int PingSeconds()
+        {
+            int s;
+            return int.TryParse(Environment.GetEnvironmentVariable("TIA_MCP_PING_SECONDS"), out s) && s > 0 ? s : 60;
+        }
+
+        static void Ping()
+        {
+            string id = sessionId;
+            if (id == null) return;
+            try { Send("POST", "/api/sessions/" + id + "/ping", new byte[0], "application/json", TimeSpan.FromSeconds(20)); }
+            catch (AgentException ex) { if (ex.Status == 410 && sessionId == id) sessionId = null; Log("ping: " + ex.Message); }
+            catch (Exception ex) { Log("ping: " + ex.Message); }
         }
 
         static string Rpc(string message)
@@ -264,6 +289,7 @@ namespace TiaMcpClient
 
         static void CloseSession()
         {
+            if (pinger != null) pinger.Dispose();
             if (sessionId == null) return;
             try { Send("DELETE", "/api/sessions/" + sessionId, null, null); Log("sessione " + sessionId + " chiusa"); }
             catch (Exception ex) { Log("chiusura sessione: " + ex.Message); }
@@ -313,9 +339,14 @@ namespace TiaMcpClient
 
         static byte[] Send(string method, string path, byte[] body, string contentType)
         {
+            return Send(method, path, body, contentType, timeout + TimeSpan.FromMinutes(1));
+        }
+
+        static byte[] Send(string method, string path, byte[] body, string contentType, TimeSpan wait)
+        {
             var req = (HttpWebRequest)WebRequest.Create(agentUrl + path);
             req.Method = method;
-            req.Timeout = req.ReadWriteTimeout = (int)Math.Min(int.MaxValue, timeout.TotalMilliseconds + 60000);
+            req.Timeout = req.ReadWriteTimeout = (int)Math.Min(int.MaxValue, wait.TotalMilliseconds);
             req.Headers["Authorization"] = "Bearer " + token;
             req.Proxy = null;
             if (body != null)
