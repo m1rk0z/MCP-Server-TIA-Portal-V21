@@ -4,19 +4,19 @@ The server speaks MCP over stdin/stdout. Every client below launches it the same
 way — the only differences are where the config file lives and what the key is
 called.
 
-Use the **absolute path** to `bin\TiaMcpServer.exe`, and escape the backslashes
+Use the **absolute path** to `bin\V21\TiaMcpServer.exe`, and escape the backslashes
 in JSON.
 
 ## Claude Code
 
 ```cmd
-claude mcp add tia -- "C:\tools\tia-mcp\bin\TiaMcpServer.exe"
+claude mcp add tia -- "C:\tools\tia-mcp\bin\V21\TiaMcpServer.exe"
 ```
 
 Read-only, which is the sane default until you trust it:
 
 ```cmd
-claude mcp add tia -- "C:\tools\tia-mcp\bin\TiaMcpServer.exe" --read-only
+claude mcp add tia -- "C:\tools\tia-mcp\bin\V21\TiaMcpServer.exe" --read-only
 ```
 
 ## Claude Desktop
@@ -27,7 +27,7 @@ claude mcp add tia -- "C:\tools\tia-mcp\bin\TiaMcpServer.exe" --read-only
 {
   "mcpServers": {
     "tia": {
-      "command": "C:\\tools\\tia-mcp\\bin\\TiaMcpServer.exe",
+      "command": "C:\\tools\\tia-mcp\\bin\\V21\\TiaMcpServer.exe",
       "args": []
     }
   }
@@ -43,7 +43,7 @@ claude mcp add tia -- "C:\tools\tia-mcp\bin\TiaMcpServer.exe" --read-only
   "servers": {
     "tia": {
       "type": "stdio",
-      "command": "C:\\tools\\tia-mcp\\bin\\TiaMcpServer.exe",
+      "command": "C:\\tools\\tia-mcp\\bin\\V21\\TiaMcpServer.exe",
       "args": ["--read-only"]
     }
   }
@@ -63,7 +63,7 @@ Example, pinning V21:
 {
   "mcpServers": {
     "tia": {
-      "command": "C:\\tools\\tia-mcp\\bin\\TiaMcpServer.exe",
+      "command": "C:\\tools\\tia-mcp\\bin\\V21\\TiaMcpServer.exe",
       "env": {
         "TIA_OPENNESS_PATH": "C:\\Program Files\\Siemens\\Automation\\Portal V21\\PublicAPI\\V21\\net48"
       }
@@ -82,11 +82,11 @@ to change something.
 {
   "mcpServers": {
     "tia": {
-      "command": "C:\\tools\\tia-mcp\\bin\\TiaMcpServer.exe",
+      "command": "C:\\tools\\tia-mcp\\bin\\V21\\TiaMcpServer.exe",
       "args": ["--read-only"]
     },
     "tia-write": {
-      "command": "C:\\tools\\tia-mcp\\bin\\TiaMcpServer.exe"
+      "command": "C:\\tools\\tia-mcp\\bin\\V21\\TiaMcpServer.exe"
     }
   }
 }

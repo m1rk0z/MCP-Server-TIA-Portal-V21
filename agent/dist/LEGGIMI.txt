@@ -1,0 +1,58 @@
+TIA MCP Agent
+=============
+
+Agente da installare sulla macchina (anche virtuale) dove gira TIA Portal.
+Permette a Claude Code, su un altro PC, di usare il server MCP per TIA Portal Openness.
+
+  PC con Claude Code                          VM con TIA Portal
+  +----------------------------+   HTTP      +---------------------------------+
+  | Claude Code                |   + token   | TiaAgent (icona TIA nella tray) |
+  |  -> TiaMcpClient.exe       | ----------> |  -> V19\TiaMcpServer.exe        |
+  |     --agent http://VM:8766 |  porta 8766 |  -> V21\TiaMcpServer.exe        |
+  |     --version V21          |             |     -> TIA Portal (Openness)    |
+  +----------------------------+             +---------------------------------+
+
+Una sessione di Claude Code = un processo TiaMcpServer sulla VM = un solo aggancio
+a TIA Portal: la conferma di Openness compare UNA volta sul desktop di questa macchina.
+
+Requisiti
+---------
+- TIA Portal V19 e/o V21 con Openness, utente nel gruppo "Siemens TIA Openness"
+- .NET Framework 4.8 (setup.cmd lo verifica)
+- Diritti di amministratore solo per installare
+
+Installazione
+-------------
+1. Copiare lo zip sulla VM ed estrarlo TUTTO in una cartella.
+2. Eseguire setup.cmd (chiede i diritti di amministratore).
+3. Scegliere porta (8766), modalita' (sola lettura consigliata) e IP del PC con Claude Code.
+4. Alla fine compare la configurazione per il PC: un server MCP per ogni versione di TIA
+   (tia-v19, tia-v21). Lo stesso testo e' in C:\ProgramData\TiaAgent\client-config.txt.
+
+L'installazione:
+- copia il programma in "C:\Program Files\TiaAgent" (con le sottocartelle V19, V21)
+- salva configurazione e token in C:\ProgramData\TiaAgent\agent.json
+  (modificabile solo dagli amministratori, leggibile dagli utenti locali)
+- registra l'URL http://+:PORTA/ per l'utente normale (netsh http urlacl)
+- apre la porta nel firewall (regola "TIA MCP Agent"), solo per gli IP indicati
+- avvia l'agente a ogni accesso di un utente: deve girare nella sessione dove gira
+  TIA Portal, perche' e' li' che compare la conferma di Openness
+
+Uso
+---
+Icona "TIA" nella tray: verde = sola lettura, arancione = lettura e scrittura, rosso = non attivo.
+In sola lettura i server TIA partono con --read-only: ogni tool che scrive viene rifiutato.
+
+File scambiati con il PC: C:\ProgramData\TiaAgent\work\<sessione> (cancellati a fine sessione)
+Log: C:\ProgramData\TiaAgent\logs (agent-*.log e server-<sessione>.log per ogni server TIA)
+
+Sicurezza
+---------
+- Ogni richiesta deve avere il token (401 senza), un PC non consentito riceve 403.
+- I file sono confinati nella cartella della sessione.
+- Il traffico HTTP non e' cifrato: usare una rete privata o host-only tra PC e VM.
+
+Modificare le impostazioni: rieseguire setup.cmd (il token resta lo stesso,
+a meno di scegliere "Genera un nuovo token").
+
+Disinstallazione: "Programmi e funzionalita'" (TIA MCP Agent) oppure disinstalla.cmd.
