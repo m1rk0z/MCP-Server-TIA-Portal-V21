@@ -25,7 +25,7 @@ namespace TiaMcp
     public static class Program
     {
         public const string ServerName = "tia-portal-openness";
-        public const string ServerVersion = "1.0.0";
+        public const string ServerVersion = "1.1.0";
 
         // Versioni di protocollo MCP che sappiamo parlare, dalla piu recente.
         static readonly string[] Supported = { "2025-06-18", "2025-03-26", "2024-11-05" };

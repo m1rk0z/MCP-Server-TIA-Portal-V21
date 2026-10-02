@@ -73,8 +73,8 @@ object, and `details` is ignored.
 
 ## Requirements
 
-- Windows with **TIA Portal V21** installed (the Openness option, and your user
-  in the local **Siemens TIA Openness** group)
+- Windows with **TIA Portal V21** (or **V19**; both can be installed side by side)
+  with the Openness option, and your user in the local **Siemens TIA Openness** group
 - **.NET Framework 4.8** — present on every engineering machine
 - **No SDK, no NuGet, no downloads.** It builds with the C# compiler that ships
   inside .NET Framework.
@@ -92,11 +92,16 @@ and tested against V21.
 build.cmd
 ```
 
-That is all. It finds `csc.exe` and the Openness assemblies by itself and writes
-`bin\TiaMcpServer.exe`. To point it somewhere specific:
+That is all. It finds `csc.exe` and builds one server **per TIA Portal version
+installed** — `bin\V19\TiaMcpServer.exe`, `bin\V21\TiaMcpServer.exe` — because an
+Openness client is tied to the version it was compiled against: a V21 build
+cannot attach to V19, and vice versa. Each build loads its own version's
+assemblies first, so V19 and V21 can live on the same machine. It also builds
+the agent and client for [remote use](#tia-portal-on-another-machine).
 
 ```cmd
-build.cmd -OpennessPath "D:\Siemens\Portal V21\PublicAPI\V21\net48"
+build.cmd -Portal V21
+build.cmd -Portal V21 -OpennessPath "D:\Siemens\Portal V21\PublicAPI\V21\net48"
 ```
 
 Then check it answers:
@@ -132,6 +137,29 @@ claude mcp add tia -- "C:\path\to\bin\TiaMcpServer.exe"
 
 Drop `--read-only` when you want it to write. See
 [examples/](examples/) for VS Code and Claude Desktop.
+
+## TIA Portal on another machine
+
+When TIA Portal runs in a VM and Claude Code on your PC, install **TiaAgent** on
+the VM and point Claude Code at **TiaMcpClient** on the PC:
+
+```
+PC: Claude Code -> TiaMcpClient --agent http://VM:8766 --version V21 --HTTP+token--> VM: TiaAgent -> V21\TiaMcpServer -> TIA Portal
+```
+
+Same 35 tools, same single confirmation (on the VM desktop, once per Claude Code
+session). Files are handled for you: imports given as PC paths are uploaded,
+exports land in `out_dir` on the PC. `setup.cmd` installs the agent with a token,
+an optional client IP allow-list and a read-only switch enforced on the VM.
+
+Full guide: [docs/REMOTE.md](docs/REMOTE.md).
+
+## Extra tools
+
+[tools/](tools/) holds small command-line programs written alongside the server
+on real jobs: Openness reflection and probes, screen export and full-scale PDF
+mock-ups, graphics export/import, STEP 7 V5 readers over the COM interface,
+Office extraction. Build them with `tools\build.ps1`.
 
 ## Safety
 

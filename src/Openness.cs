@@ -31,6 +31,17 @@ namespace TiaMcp
         /// <summary>Versione di Portal dedotta dal percorso, es. "V21".</summary>
         public static string PortalVersion { get; private set; }
 
+        /// <summary>TIA Portal version this build was compiled against ("V19", "V21"), empty if not fixed at build time.</summary>
+#if PORTAL_V19
+        public const string TargetPortal = "V19";
+#elif PORTAL_V20
+        public const string TargetPortal = "V20";
+#elif PORTAL_V21
+        public const string TargetPortal = "V21";
+#else
+        public const string TargetPortal = "";
+#endif
+
         /// <summary>
         /// Da installare PRIMA di toccare qualunque tipo di Siemens.Engineering:
         /// il JIT risolve l'assembly al primo metodo che la nomina, non alla prima riga.
@@ -80,6 +91,19 @@ namespace TiaMcp
                     Add(seen, part.Trim());
 
             // 2. le PublicAPI di ogni Portal installato, dalla piu recente
+            // A build is tied to one Openness version (build.ps1 -Portal V19|V21 defines PORTAL_Vxx):
+            // its own installation comes first, otherwise a V19 build would pick up the V21
+            // assemblies on a machine where both are installed.
+            if (TargetPortal.Length > 0)
+                foreach (string program in new[] { @"C:\Program Files\Siemens\Automation",
+                                                   @"C:\Program Files (x86)\Siemens\Automation" })
+                {
+                    string root = Path.Combine(program, "Portal " + TargetPortal);
+                    Add(seen, Path.Combine(root, @"PublicAPI\" + TargetPortal + @"\net48"));
+                    Add(seen, Path.Combine(root, @"PublicAPI\" + TargetPortal));
+                    Add(seen, Path.Combine(root, "Bin"));
+                }
+
             foreach (string root in PortalRoots())
             {
                 string publicApi = Path.Combine(root, "PublicAPI");

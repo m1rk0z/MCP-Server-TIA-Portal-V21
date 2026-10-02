@@ -66,8 +66,8 @@ dell'oggetto vivo, e `details` viene ignorato.
 
 ## Cosa serve
 
-- Windows con **TIA Portal V21** installato (opzione Openness, e il proprio
-  utente nel gruppo locale **Siemens TIA Openness**)
+- Windows con **TIA Portal V21** (o **V19**; possono convivere) con l'opzione
+  Openness, e il proprio utente nel gruppo locale **Siemens TIA Openness**
 - **.NET Framework 4.8**, presente su ogni macchina di engineering
 - **Nessun SDK, nessun NuGet, niente da scaricare**: si compila con il
   compilatore C# che sta dentro .NET Framework
@@ -85,11 +85,16 @@ un'installazione piu vecchia — ma e costruito e provato sulla V21.
 build.cmd
 ```
 
-Tutto qui. Trova da solo `csc.exe` e le assembly di Openness, e scrive
-`bin\TiaMcpServer.exe`. Per indicargliele:
+Tutto qui. Trova da solo `csc.exe` e compila un server **per ogni versione di
+TIA Portal installata** — `bin\V19\TiaMcpServer.exe`, `bin\V21\TiaMcpServer.exe` —
+perché un client Openness è legato alla versione con cui è compilato: una build
+V21 non si aggancia alla V19, e viceversa. Ogni build carica prima le assembly
+della propria versione, quindi V19 e V21 convivono sulla stessa macchina.
+Compila anche agente e client per l'[uso remoto](#tia-portal-su-unaltra-macchina).
 
 ```cmd
-build.cmd -OpennessPath "D:\Siemens\Portal V21\PublicAPI\V21\net48"
+build.cmd -Portal V21
+build.cmd -Portal V21 -OpennessPath "D:\Siemens\Portal V21\PublicAPI\V21\net48"
 ```
 
 Poi si controlla che risponda:
@@ -125,6 +130,31 @@ claude mcp add tia -- "C:\percorso\bin\TiaMcpServer.exe"
 
 Si toglie `--read-only` quando deve poter scrivere. In [examples/](examples/) ci
 sono VS Code e Claude Desktop.
+
+## TIA Portal su un'altra macchina
+
+Quando TIA Portal gira in una VM e Claude Code sul PC, sulla VM si installa
+**TiaAgent** e Claude Code usa **TiaMcpClient** sul PC:
+
+```
+PC: Claude Code -> TiaMcpClient --agent http://VM:8766 --version V21 --HTTP+token--> VM: TiaAgent -> V21\TiaMcpServer -> TIA Portal
+```
+
+Stessi 35 tool, stessa conferma unica (sul desktop della VM, una volta per
+sessione di Claude Code). I file si gestiscono da soli: gli import indicati con
+percorsi del PC vengono caricati, gli export arrivano in `out_dir` sul PC.
+`setup.cmd` installa l'agente con un token, una lista facoltativa degli IP
+ammessi e la sola lettura imposta sulla VM.
+
+Guida completa (in inglese): [docs/REMOTE.md](docs/REMOTE.md).
+
+## Strumenti aggiuntivi
+
+In [tools/](tools/) ci sono piccoli programmi da riga di comando scritti
+accanto al server durante lavori reali: reflection e sonde di Openness, export
+delle schermate e mockup PDF in scala reale, export/import delle grafiche,
+lettori STEP 7 V5 via interfaccia COM, estrazione da Office. Si compilano con
+`tools\build.ps1`.
 
 ## Sicurezza
 

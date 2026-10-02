@@ -25,7 +25,7 @@ using Siemens.Engineering.HmiUnified;
 using Siemens.Engineering.HmiUnified.HmiAlarm;
 using Siemens.Engineering.HmiUnified.HmiConnections;
 using Siemens.Engineering.HmiUnified.HmiTags;
-using Siemens.Engineering.HmiUnified.TextGraphicList;
+// using Siemens.Engineering.HmiUnified.TextGraphicList; -- removed: not present in V19
 using Siemens.Engineering.HmiUnified.UI.Base;
 using Siemens.Engineering.HmiUnified.UI.Screens;
 
@@ -67,8 +67,8 @@ namespace TiaMcp
                  .Set("screen_groups", Count(sw.ScreenGroups))
                  .Set("tag_tables", Count(sw.TagTables))
                  .Set("tags", Count(sw.Tags))
-                 .Set("text_lists", Count(sw.HmiTextLists))
-                 .Set("graphic_lists", Count(sw.HmiGraphicLists))
+                 .Set("text_lists", Count(Prop(sw, "HmiTextLists")))
+                 .Set("graphic_lists", Count(Prop(sw, "HmiGraphicLists")))
                  .Set("connections", Count(sw.Connections))
                  .Set("discrete_alarms", Count(sw.DiscreteAlarms))
                  .Set("analog_alarms", Count(sw.AnalogAlarms))
@@ -90,6 +90,16 @@ namespace TiaMcp
             if (p == null) return 0;
             try { return (int)p.GetValue(composition, null); }
             catch { return 0; }
+        }
+
+        /// <summary>Get a property value by name via reflection, returning null if the property doesn't exist (V19 compat).</summary>
+        static object Prop(object target, string name)
+        {
+            if (target == null) return null;
+            PropertyInfo p = target.GetType().GetProperty(name);
+            if (p == null) return null;
+            try { return p.GetValue(target, null); }
+            catch { return null; }
         }
 
         // ------------------------------------------------------------ schermate
@@ -423,21 +433,28 @@ namespace TiaMcp
         public override List<JObj> TextLists()
         {
             var result = new List<JObj>();
-            foreach (HmiTextList t in sw.HmiTextLists)
-                result.Add(new JObj().Set("name", t.Name));
+            object lists = Prop(sw, "HmiTextLists");
+            if (lists != null)
+                foreach (IEngineeringObject t in (IEnumerable)lists)
+                    result.Add(new JObj().Set("name", TiaSession.Attr(t, "Name")));
             return result;
         }
 
         public override JObj ExportTextLists(string outDir, List<string> names)
         {
             EnsureDir(outDir, "out_dir");
+            object lists = Prop(sw, "HmiTextLists");
+            if (lists == null) throw new McpError("HmiTextLists not available in this Openness version.");
             string logical = names != null && names.Count > 0 ? names[0] : "TextLists";
             var written = new List<string>();
             try
             {
-                foreach (FileInfo f in sw.HmiTextLists.Export(new DirectoryInfo(outDir), logical))
+                MethodInfo export = lists.GetType().GetMethod("Export", new Type[] { typeof(DirectoryInfo), typeof(string) });
+                if (export == null) throw new McpError("Export method not found on HmiTextLists.");
+                foreach (FileInfo f in (IEnumerable)export.Invoke(lists, new object[] { new DirectoryInfo(outDir), logical }))
                     written.Add(f.FullName);
             }
+            catch (McpError) { throw; }
             catch (Exception ex) { throw new McpError("Text list export failed: " + Flat(ex)); }
 
             return new JObj().Set("exported", written.Count).Set("out_dir", outDir)
@@ -447,13 +464,21 @@ namespace TiaMcp
         public override JObj ImportTextLists(List<string> files, bool overwrite)
         {
             if (files == null || files.Count == 0) throw new McpError("Give the source file or folder.");
+            object lists = Prop(sw, "HmiTextLists");
+            if (lists == null) throw new McpError("HmiTextLists not available in this Openness version.");
             string first = files[0];
             string dir = File.Exists(first) ? Path.GetDirectoryName(first) : first;
             string logical = File.Exists(first) ? Path.GetFileNameWithoutExtension(first) : "TextLists";
             if (!Directory.Exists(dir)) throw new McpError("Source folder not found: " + dir);
 
             bool ok;
-            try { ok = sw.HmiTextLists.Import(new DirectoryInfo(dir), logical); }
+            try
+            {
+                MethodInfo import = lists.GetType().GetMethod("Import", new Type[] { typeof(DirectoryInfo), typeof(string) });
+                if (import == null) throw new McpError("Import method not found on HmiTextLists.");
+                ok = (bool)import.Invoke(lists, new object[] { new DirectoryInfo(dir), logical });
+            }
+            catch (McpError) { throw; }
             catch (Exception ex) { throw new McpError("Text list import failed: " + Flat(ex)); }
 
             return new JObj().Set("imported", ok).Set("source_dir", dir).Set("name", logical);

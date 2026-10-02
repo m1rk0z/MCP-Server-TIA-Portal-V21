@@ -158,7 +158,8 @@ namespace TiaMcp
                 .Set("mode", Mode)
                 .Set("pid", ProcessId)
                 .Set("openness_assemblies", Openness.ResolvedFrom)
-                .Set("portal_version", Openness.PortalVersion);
+                .Set("portal_version", Openness.PortalVersion)
+                .Set("built_for", Openness.TargetPortal.Length > 0 ? Openness.TargetPortal : "any");
 
             if (project == null) { j.Set("project", null); return j; }
 

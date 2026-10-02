@@ -11,7 +11,14 @@
 param([switch] $Attach)
 
 $ErrorActionPreference = 'Stop'
-$exe = Join-Path (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)) 'bin\TiaMcpServer.exe'
+# server da provare: TIA_MCP_SERVER, altrimenti la build piu recente in bin\Vxx\
+$exe = $env:TIA_MCP_SERVER
+if (-not $exe) {
+    $bin = Join-Path (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)) 'bin'
+    $exe = Get-ChildItem $bin -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^V\d+$' } |
+           Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'TiaMcpServer.exe' } |
+           Where-Object { Test-Path $_ } | Select-Object -First 1
+}
 if (-not (Test-Path $exe)) { throw "Non compilato: manca $exe. Lancia prima .\build.cmd" }
 
 $messages = @(
