@@ -1,0 +1,16 @@
+{
+  "name": "mcp-server-tia-portal",
+  "owner": {
+    "name": "m1rk0z"
+  },
+  "metadata": {
+    "description": "Skills for the TIA Portal MCP server (TIA Portal V19/V21, WinCC)."
+  },
+  "plugins": [
+    {
+      "name": "tia-portal-skills",
+      "source": "./",
+      "description": "Skills for TIA Portal V19/V21 to use with the TIA Portal MCP server."
+    }
+  ]
+}
