@@ -161,6 +161,25 @@ on real jobs: Openness reflection and probes, screen export and full-scale PDF
 mock-ups, graphics export/import, STEP 7 V5 readers over the COM interface,
 Office extraction. Build them with `tools\build.ps1`.
 
+## Skills
+
+The repository is also a Claude Code plugin with skills that encode how to use the server safely,
+learned on real projects:
+
+| Skill | What it is for |
+|---|---|
+| `tia-openness-session` | Plan a session: right Portal version, one confirmation, explicit compile and save |
+| `tia-hmi-safe-import` | Import WinCC classic screens without losing alarm and recipe views (`keep_safe`), and how to recover them |
+| `tia-hmi-tag-address` | Change HMI tag addresses via export → XML → import, checked against the PLC |
+| `tia-delivery-package` | Dated delivery folder, zip with the project closed, README for the download |
+
+```
+/plugin marketplace add m1rk0z/MCP-Server-TIA-Portal-V21
+/plugin install tia-portal-skills@mcp-server-tia-portal
+```
+
+Or with the skills CLI: `npx skills add m1rk0z/MCP-Server-TIA-Portal-V21`.
+
 ## Safety
 
 Driving an engineering tool from a language model deserves more care than

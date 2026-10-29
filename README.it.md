@@ -156,6 +156,25 @@ delle schermate e mockup PDF in scala reale, export/import delle grafiche,
 lettori STEP 7 V5 via interfaccia COM, estrazione da Office. Si compilano con
 `tools\build.ps1`.
 
+## Skill
+
+Il repository è anche un plugin di Claude Code con skill che descrivono come usare il server in
+sicurezza, ricavate da lavori reali:
+
+| Skill | A cosa serve |
+|---|---|
+| `tia-openness-session` | Pianificare una sessione: versione giusta di TIA, una sola conferma, compilazione e salvataggio espliciti |
+| `tia-hmi-safe-import` | Importare schermate WinCC classic senza perdere viste allarmi e ricette (`keep_safe`), e come recuperarle |
+| `tia-hmi-tag-address` | Cambiare l'indirizzo dei tag HMI con export → XML → import, verificato sul PLC |
+| `tia-delivery-package` | Cartella di consegna datata, zip a progetto chiuso, LEGGIMI per il download |
+
+```
+/plugin marketplace add m1rk0z/MCP-Server-TIA-Portal-V21
+/plugin install tia-portal-skills@mcp-server-tia-portal
+```
+
+Oppure con la CLI delle skill: `npx skills add m1rk0z/MCP-Server-TIA-Portal-V21`. Le skill sono in inglese.
+
 ## Sicurezza
 
 Far pilotare un sistema di engineering a un modello linguistico merita piu
