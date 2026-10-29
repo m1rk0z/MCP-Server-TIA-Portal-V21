@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "tia-portal-skills",
-      "source": "./",
+      "source": "./claude-plugin",
       "description": "Skills for TIA Portal V19/V21 to use with the TIA Portal MCP server."
     }
   ]

@@ -21,8 +21,12 @@ stays clean, the panel looks fine, and alarms or recipes stop showing up on the 
    - take every screen whose name or number suggests alarms, alarm history, recipes, recipe data,
      trends or diagnostics (in Italian projects: *Allarmi*, *Storico*, *Ricette*, *Ricetta*, *Carico*,
      *Trend*), plus every pop-up that contains a recipe view;
+   - also propose user-administration screens (user view) as candidates;
    - **show the list to the user and ask them to complete it** - only someone who knows the panel can
-     confirm it.
+     confirm it. The name rule is a starting point, not an answer: configuration screens or
+     pop-ups with an innocent name (for example "Config ...") can hold a recipe view, and nothing
+     in the screen list or in the export reveals it. If an earlier delivery or project note lists
+     protected screens, use that list.
 4. Export the screens to edit with `hmi_export_screens` and `with_defaults: true` (a lean export
    loses attributes the import cannot restore). Keep this export as the "before" copy.
 

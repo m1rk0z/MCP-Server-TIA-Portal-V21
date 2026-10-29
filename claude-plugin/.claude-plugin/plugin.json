@@ -1,7 +1,7 @@
 {
   "name": "tia-portal-skills",
   "description": "Skills for working safely with TIA Portal through the TIA Portal MCP server: one-confirmation Openness sessions, safe WinCC screen imports, HMI tag address changes and delivery packages.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": { "name": "m1rk0z" },
   "repository": "https://github.com/m1rk0z/MCP-Server-TIA-Portal-V21",
   "license": "MIT",
