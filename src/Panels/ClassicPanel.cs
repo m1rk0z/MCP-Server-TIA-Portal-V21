@@ -546,7 +546,8 @@ namespace TiaMcp
                 var attrs = new JObj();
                 try
                 {
-                    foreach (EngineeringAttributeInfo i in c.GetAttributeInfos())
+                    // Attraverso l'interfaccia: in V15.1 Connection non espone GetAttributeInfos.
+                    foreach (EngineeringAttributeInfo i in ((IEngineeringObject)c).GetAttributeInfos())
                     {
                         string v = TiaSession.Attr(c, i.Name);
                         if (!string.IsNullOrEmpty(v)) attrs.Set(i.Name, v);

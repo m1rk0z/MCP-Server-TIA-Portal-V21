@@ -104,6 +104,13 @@ build.cmd -Portal V21
 build.cmd -Portal V21 -OpennessPath "D:\Siemens\Portal V21\PublicAPI\V21\net48"
 ```
 
+**TIA Portal V15.1** builds the same way (`build.cmd -Portal V15_1`, or
+automatically when installed): the folder is `Portal V15_1`, the assemblies sit
+in `PublicAPI\V15.1`. WinCC Unified starts with V16, so the V15.1 build leaves
+it out and the Unified-only tools answer with a clear error. Tested through the
+remote agent on a Windows 7 SP1 VM with .NET 4.8: attach, PLC block listing and
+export.
+
 Then check it answers:
 
 ```cmd
