@@ -67,8 +67,10 @@ namespace TiaMcp
         {
             if (r.Software is Siemens.Engineering.Hmi.HmiTarget)
                 return new ClassicPanel(r);
+#if !NO_UNIFIED
             if (r.Software is Siemens.Engineering.HmiUnified.HmiSoftware)
                 return new UnifiedPanel(r);
+#endif
             return null;
         }
 

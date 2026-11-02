@@ -14,7 +14,11 @@
 // ScreenItems.Create<T>() e generico. Per creare un tipo scelto a runtime si
 // passa da MakeGenericMethod: cosi il server supporta ogni oggetto della
 // libreria Unified senza doverne elencare uno per uno i cento tipi.
+//
+// Unified esiste dalla V16: le build per V15/V15.1 definiscono NO_UNIFIED e al
+// posto della classe vera compilano lo stub in fondo al file.
 
+#if !NO_UNIFIED
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -535,3 +539,30 @@ namespace TiaMcp
         }
     }
 }
+#else
+using System.Collections.Generic;
+
+namespace TiaMcp
+{
+    // Astratta e mai istanziata: Panel.Wrap non riconosce pannelli Unified, quindi
+    // PickUnified risponde sempre con l'errore "solo Unified".
+    public abstract class UnifiedPanel : Panel
+    {
+        public JObj CreateScreenItem(string screen, string typeName, string itemName, JObj attributes)
+        {
+            throw NotInThisPortal();
+        }
+
+        public static List<JObj> ItemTypes(string contains)
+        {
+            throw NotInThisPortal();
+        }
+
+        static McpError NotInThisPortal()
+        {
+            return new McpError("WinCC Unified does not exist in TIA Portal " + Openness.TargetPortal +
+                                " (it starts with V16).");
+        }
+    }
+}
+#endif

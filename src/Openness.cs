@@ -32,7 +32,9 @@ namespace TiaMcp
         public static string PortalVersion { get; private set; }
 
         /// <summary>TIA Portal version this build was compiled against ("V19", "V21"), empty if not fixed at build time.</summary>
-#if PORTAL_V19
+#if PORTAL_V15_1
+        public const string TargetPortal = "V15_1";
+#elif PORTAL_V19
         public const string TargetPortal = "V19";
 #elif PORTAL_V20
         public const string TargetPortal = "V20";
@@ -98,9 +100,11 @@ namespace TiaMcp
                 foreach (string program in new[] { @"C:\Program Files\Siemens\Automation",
                                                    @"C:\Program Files (x86)\Siemens\Automation" })
                 {
+                    // La cartella del Portal usa "_" (Portal V15_1), quella delle API il punto (PublicAPI\V15.1).
                     string root = Path.Combine(program, "Portal " + TargetPortal);
-                    Add(seen, Path.Combine(root, @"PublicAPI\" + TargetPortal + @"\net48"));
-                    Add(seen, Path.Combine(root, @"PublicAPI\" + TargetPortal));
+                    string api = TargetPortal.Replace('_', '.');
+                    Add(seen, Path.Combine(root, @"PublicAPI\" + api + @"\net48"));
+                    Add(seen, Path.Combine(root, @"PublicAPI\" + api));
                     Add(seen, Path.Combine(root, "Bin"));
                 }
 
