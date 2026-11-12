@@ -67,8 +67,12 @@ namespace TiaMcp
             foreach (SoftwareRef r in session.Softwares())
             {
                 bool isPlc = r.Software is Siemens.Engineering.SW.PlcSoftware;
+#if NO_UNIFIED
+                bool isHmi = r.Software is Siemens.Engineering.Hmi.HmiTarget;
+#else
                 bool isHmi = r.Software is Siemens.Engineering.Hmi.HmiTarget ||
                              r.Software is Siemens.Engineering.HmiUnified.HmiSoftware;
+#endif
                 if (isPlc && !wantPlc) continue;
                 if (isHmi && !wantHmi) continue;
                 if (!isPlc && !isHmi) continue;

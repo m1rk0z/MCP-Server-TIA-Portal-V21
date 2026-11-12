@@ -71,9 +71,10 @@ function Compile($exe, $target, $platform, $sources, $refs, $defines) {
 # -------------------------------------------------------- assembly di Openness
 
 # Cartella delle assembly di una versione: PublicAPI\Vxx\net48 (V20+) oppure PublicAPI\Vxx (V19).
+# V15.1: la cartella e "Portal V15_1", le API stanno in PublicAPI\V15.1.
 function Find-Openness([string] $version) {
     foreach ($base in @("$env:ProgramFiles\Siemens\Automation", "${env:ProgramFiles(x86)}\Siemens\Automation")) {
-        $api = Join-Path $base "Portal $version\PublicAPI\$version"
+        $api = Join-Path $base "Portal $version\PublicAPI\$($version -replace '_', '.')"
         foreach ($candidate in @((Join-Path $api 'net48'), $api)) {
             if (Test-Path (Join-Path $candidate 'Siemens.Engineering.Base.dll')) { return $candidate }
             if (Test-Path (Join-Path $candidate 'Siemens.Engineering.dll'))      { return $candidate }
@@ -87,7 +88,7 @@ function Installed-Portals {
     foreach ($base in @("$env:ProgramFiles\Siemens\Automation", "${env:ProgramFiles(x86)}\Siemens\Automation")) {
         if (-not (Test-Path $base)) { continue }
         foreach ($d in Get-ChildItem -Path $base -Directory) {
-            if ($d.Name -notmatch '^Portal (V\d+)$') { continue }
+            if ($d.Name -notmatch '^Portal (V\d+(_\d+)?)$') { continue }
             $v = $Matches[1]   # letto subito dopo il -match di questa cartella
             if ((Find-Openness $v) -and ($found -notcontains $v)) { $found += $v }
         }
@@ -120,7 +121,10 @@ function Build-Server([string] $version, [string] $api) {
     }
     if ($refs.Count -eq 0) { throw "Nessuna assembly Siemens.Engineering trovata in $api" }
     # PORTAL_Vxx: la build cerca prima le assembly della propria versione (Openness.cs).
-    Compile (Join-Path $bin "$version\TiaMcpServer.exe") 'exe' 'x64' $serverSources $refs "PORTAL_$version"
+    # NO_UNIFIED: WinCC Unified esiste dalla V16, prima non c'e il namespace HmiUnified.
+    $defines = "PORTAL_$version"
+    if ([int]($version -replace '^V(\d+).*$', '$1') -lt 16) { $defines += ';NO_UNIFIED' }
+    Compile (Join-Path $bin "$version\TiaMcpServer.exe") 'exe' 'x64' $serverSources $refs $defines
 }
 
 # ------------------------------------------------------------------ server

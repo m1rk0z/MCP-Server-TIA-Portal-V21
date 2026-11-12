@@ -97,6 +97,13 @@ build.cmd -Portal V21
 build.cmd -Portal V21 -OpennessPath "D:\Siemens\Portal V21\PublicAPI\V21\net48"
 ```
 
+**TIA Portal V15.1** si compila allo stesso modo (`build.cmd -Portal V15_1`, o
+in automatico se e installata): la cartella e `Portal V15_1`, le assembly stanno
+in `PublicAPI\V15.1`. WinCC Unified esiste dalla V16, quindi la build V15.1 lo
+esclude e gli strumenti solo Unified rispondono con un errore chiaro. Provata con
+l'agente remoto su una VM Windows 7 SP1 con .NET 4.8: attach, elenco ed export
+dei blocchi PLC.
+
 Poi si controlla che risponda:
 
 ```cmd
