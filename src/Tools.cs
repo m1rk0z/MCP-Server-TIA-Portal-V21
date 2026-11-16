@@ -592,6 +592,25 @@ namespace TiaMcp
                 .ArgList("names", "Blocks to export.")
                 .Run = delegate(JObj a) { return PickPlc(a).ExportBlocks(a.Str("out_dir"), a.Strings("names")); };
 
+            Add("plc_compare_online",
+                "Online/offline compare of a PLC: TIA Portal compares the project's PLC software with the CPU " +
+                "(Openness CompareToOnline) and returns the objects that differ, exist only in the project or only " +
+                "in the CPU. Works for S7-1200/1500 too. TIA goes online with the CPU for the compare (using the " +
+                "connection stored in the project) and goes back offline if it was offline before. Read only: " +
+                "nothing is downloaded, uploaded or saved.")
+                .Arg("plc", "string", "PLC or device name. Omit when there is only one.")
+                .Arg("include_identical", "boolean", "Also list identical objects. Default false.")
+                .Arg("limit", "integer", "Maximum number of listed objects. Default 500, 0 means no limit.")
+                .Arg("pc_interface", "string", "PG/PC interface of the TIA machine (part of its name). Default: the " +
+                     "connection stored in the project, or else the interface in the CPU's subnet.")
+                .Arg("mode", "string", "Connection mode. Default PN/IE.")
+                .Run = delegate(JObj a)
+                {
+                    session.RequireAttached();
+                    return PickPlc(a).CompareOnline(a.Bool("include_identical", false), a.Int("limit", 500),
+                                                    a.Str("mode"), a.Str("pc_interface"));
+                };
+
             Add("plc_tag_tables", "The PLC's tag tables.")
                 .Arg("plc", "string", "PLC name.")
                 .Run = delegate(JObj a)

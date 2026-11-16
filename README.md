@@ -231,7 +231,7 @@ Nothing is ever saved implicitly: changes live in memory until `tia_save`.
 `hmi_create_screen_item` `hmi_item_types`
 
 **PLC, read-only** — `plc_list` `plc_blocks` `plc_export_blocks`
-`plc_tag_tables` `plc_tags`
+`plc_compare_online` `plc_tag_tables` `plc_tags`
 
 ### `tia_browse` — the escape hatch
 

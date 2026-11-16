@@ -342,6 +342,28 @@ modified.
 Know-how protected blocks cannot be exported and are reported as such rather
 than raising.
 
+### `plc_compare_online`
+
+| argument | type | |
+|---|---|---|
+| `plc` | string | omit when there is only one |
+| `include_identical` | boolean | also list identical objects, default false |
+| `limit` | integer | default 500, 0 means no limit |
+| `pc_interface` | string | PG/PC interface of the TIA machine (part of its name) |
+| `mode` | string | connection mode, default `PN/IE` |
+
+Online/offline compare done by TIA Portal itself (Openness `CompareToOnline`):
+the project's PLC software against the CPU, S7-1200/1500 included. Returns a
+summary by state and the objects that are not identical, with their path:
+`ObjectsDifferent`, `LeftMissing` (only in the CPU), `RightMissing` (only in the
+project), and folders whose own state differs. Left is the project, right the CPU.
+
+TIA goes online with the connection stored in the project; when there is none,
+or it does not reach the CPU from this machine, it uses the PG/PC interface in the
+CPU's subnet (or the one named with `pc_interface`). That setting stays in memory,
+the project is not saved. If the CPU was offline it goes back offline at the end. A CPU protected by a read access password must be put online
+by hand first. Nothing is downloaded, uploaded or saved.
+
 ### `plc_tag_tables`, `plc_tags`
 Tables and tags with absolute address and data type. Use them to check what an
 HMI tag actually points at.
