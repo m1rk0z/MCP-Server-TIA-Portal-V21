@@ -11,6 +11,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Siemens.Engineering;
+using Siemens.Engineering.Compare;
+using Siemens.Engineering.HW;
+using Siemens.Engineering.HW.Features;
+using Siemens.Engineering.Online;
 using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
 using Siemens.Engineering.SW.Tags;
@@ -156,6 +160,257 @@ namespace TiaMcp
             foreach (char c in name)
                 sb.Append(Array.IndexOf(Path.GetInvalidFileNameChars(), c) >= 0 ? '_' : c);
             return sb.ToString();
+        }
+
+        // ------------------------------------------------- confronto online/offline
+
+        // Il confronto e quello di TIA (Openness CompareToOnline): legge dalla CPU, non
+        // carica e non scarica niente, non salva il progetto. La connessione e quella
+        // memorizzata nel progetto; se manca o non porta alla CPU da questa macchina si
+        // usa l'interfaccia PG/PC nella sottorete della CPU (o quella indicata). Se la
+        // CPU era offline la si porta online solo per il confronto e poi offline.
+
+        public JObj CompareOnline(bool includeIdentical, int limit, string modeName, string pcInterface)
+        {
+            OnlineProvider online = null;
+            try { online = Ref.Item.GetService<OnlineProvider>(); } catch { online = null; }
+            if (online == null)
+                throw new McpError("The CPU '" + DeviceName + "' offers no online connection through Openness.");
+
+            bool wentOnline = false;
+            OnlineState before = online.State;
+            JObj connection = null;
+            if (before != OnlineState.Online)
+            {
+                connection = Configure(online.Configuration, modeName, pcInterface, false, CpuAddresses());
+                OnlineState now;
+                try { now = online.GoOnline(); }
+                catch (Exception first)
+                {
+                    // la connessione memorizzata nel progetto non porta alla CPU da questa macchina:
+                    // si riprova una volta con l'interfaccia nella sottorete della CPU
+                    if (connection.Str("source") != "stored in the project") throw Fail(connection, first);
+                    try
+                    {
+                        connection = Configure(online.Configuration, modeName, pcInterface, true, CpuAddresses());
+                        now = online.GoOnline();
+                    }
+                    catch (McpError) { throw; }
+                    catch (Exception ex) { throw Fail(connection, ex); }
+                }
+                wentOnline = true;
+                if (now != OnlineState.Online)
+                {
+                    try { online.GoOffline(); } catch { }
+                    throw new McpError("Going online with '" + DeviceName + "' ended in state " + now +
+                                       (now == OnlineState.Protected ? " (the CPU needs a read access password: go online by hand in TIA Portal first)" : "") + ".");
+                }
+            }
+            return Compare(online, before, wentOnline, connection, includeIdentical, limit);
+        }
+
+        McpError Fail(JObj connection, Exception ex)
+        {
+            return new McpError("Cannot go online with '" + DeviceName + "' (" + Json.Write(connection) + "): " + Flat(ex) +
+                                ". Check that the CPU answers from this machine, or name the PG/PC interface with pc_interface.");
+        }
+
+        JObj Compare(OnlineProvider online, OnlineState before, bool wentOnline, JObj connection, bool includeIdentical, int limit)
+        {
+            var started = DateTime.Now;
+            var items = new List<JObj>();
+            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+            int listed = 0, total = 0;
+            try
+            {
+                CompareResult result = sw.CompareToOnline();
+                Walk(result.RootElement, "", includeIdentical, limit, items, counts, ref listed, ref total);
+            }
+            catch (McpError) { throw; }
+            catch (Exception ex) { throw new McpError("Compare with the CPU failed: " + Flat(ex)); }
+            finally
+            {
+                if (wentOnline) { try { online.GoOffline(); } catch { } }
+            }
+
+            var summary = new JObj();
+            foreach (var kv in counts) summary.Set(kv.Key, kv.Value);
+            return new JObj()
+                .Set("plc", DeviceName)
+                .Set("online_before", before.ToString())
+                .Set("went_online_for_compare", wentOnline)
+                .Set("connection", connection)
+                .Set("duration_s", Math.Round((DateTime.Now - started).TotalSeconds, 1))
+                .Set("summary", summary)
+                .Set("objects", total)
+                .Set("listed", items.Count)
+                .Set("truncated", listed > items.Count)
+                .Set("items", items)
+                .Set("legend", new JObj()
+                    .Set("left", "project (offline)")
+                    .Set("right", "CPU (online)")
+                    .Set("LeftMissing", "only in the CPU")
+                    .Set("RightMissing", "only in the project"))
+                .Set("note", "Read only: TIA compared the project with the CPU; nothing was downloaded, uploaded or saved.");
+        }
+
+        // Connessione online: quella gia memorizzata nel progetto, oppure (pc_interface
+        // indicata, o nessuna configurata) l'interfaccia PG/PC di questa macchina che sta
+        // nella stessa sottorete /24 dell'indirizzo della CPU. ApplyConfiguration cambia
+        // solo l'impostazione in memoria: il progetto non viene salvato.
+        static JObj Configure(Siemens.Engineering.Connection.ConnectionConfiguration cfg, string modeName, string pcInterface,
+                              bool force, List<string> cpuAddresses)
+        {
+            if (cfg == null) return new JObj().Set("source", "none");
+            if (cfg.IsConfigured && string.IsNullOrEmpty(pcInterface) && !force)
+                return new JObj().Set("source", "stored in the project");
+
+            string wantedMode = string.IsNullOrEmpty(modeName) ? "PN/IE" : modeName;
+            Siemens.Engineering.Connection.ConfigurationMode mode = null;
+            var modes = new List<string>();
+            foreach (Siemens.Engineering.Connection.ConfigurationMode m in cfg.Modes)
+            {
+                modes.Add(m.Name);
+                if (string.Equals(m.Name, wantedMode, StringComparison.OrdinalIgnoreCase)) mode = m;
+            }
+            if (mode == null)
+                throw new McpError("No connection mode '" + wantedMode + "'. Available: " + string.Join(", ", modes.ToArray()));
+
+            var seen = new List<string>();
+            foreach (Siemens.Engineering.Connection.ConfigurationPcInterface pc in mode.PcInterfaces)
+            {
+                string label = pc.Name + " #" + pc.Number;
+                // Openness non da gli IP delle schede del PC: si prendono da Windows
+                List<string> own = LocalAddresses(pc.Name, pc.Number);
+                foreach (Siemens.Engineering.Connection.ConfigurationAddress a in pc.Addresses) own.Add(a.Name);
+
+                var targets = new List<string>();
+                Siemens.Engineering.Connection.ConfigurationTargetInterface chosen = null;
+                string chosenAddress = null;
+                foreach (Siemens.Engineering.Connection.ConfigurationTargetInterface ti in pc.TargetInterfaces)
+                {
+                    var tAddr = new List<string>();
+                    foreach (Siemens.Engineering.Connection.ConfigurationAddress ta in ti.Addresses) tAddr.Add(ta.Name);
+                    targets.Add(ti.Name + (tAddr.Count > 0 ? " (" + string.Join(", ", tAddr.ToArray()) + ")" : ""));
+                    if (tAddr.Count == 0) tAddr.AddRange(cpuAddresses);
+                    foreach (string t in tAddr)
+                        foreach (string o in own)
+                            if (chosen == null && SameSubnet(o, t)) { chosen = ti; chosenAddress = t; }
+                    if (chosen == null && !string.IsNullOrEmpty(pcInterface) && Matches(label, pcInterface))
+                    {
+                        chosen = ti;
+                        chosenAddress = tAddr.Count > 0 ? tAddr[0] : null;
+                    }
+                }
+                seen.Add(label + " [" + string.Join(", ", own.ToArray()) + "] -> " + string.Join(", ", targets.ToArray()));
+                if (!string.IsNullOrEmpty(pcInterface) && !Matches(label, pcInterface)) continue;
+                if (chosen == null || !cfg.ApplyConfiguration(chosen)) continue;
+                return new JObj().Set("source", "set for this compare (not saved)")
+                    .Set("mode", mode.Name).Set("pc_interface", label).Set("pc_addresses", own)
+                    .Set("target_interface", chosen.Name).Set("cpu_address", chosenAddress);
+            }
+            throw new McpError("No PG/PC interface of this machine reaches the CPU (" + string.Join(", ", cpuAddresses.ToArray()) +
+                               ") in mode " + mode.Name +
+                               (string.IsNullOrEmpty(pcInterface) ? "" : " matching '" + pcInterface + "'") +
+                               ". Interfaces: " + string.Join("; ", seen.ToArray()) + ". Name one with pc_interface (e.g. '#3').");
+        }
+
+        static bool Matches(string label, string wanted)
+        {
+            return label.IndexOf(wanted, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>IPv4 della scheda di Windows che TIA chiama "nome" numero n ("nome" per 1, "nome #n" per gli altri).</summary>
+        static List<string> LocalAddresses(string name, int number)
+        {
+            var result = new List<string>();
+            foreach (System.Net.NetworkInformation.NetworkInterface nic in
+                     System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                string d = nic.Description ?? "";
+                bool same = number <= 1 ? string.Equals(d, name, StringComparison.OrdinalIgnoreCase)
+                                        : string.Equals(d, name + " #" + number, StringComparison.OrdinalIgnoreCase);
+                if (!same) continue;
+                foreach (System.Net.NetworkInformation.UnicastIPAddressInformation u in nic.GetIPProperties().UnicastAddresses)
+                    if (u.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) result.Add(u.Address.ToString());
+            }
+            return result;
+        }
+
+        /// <summary>Indirizzi IP delle interfacce della stazione della CPU, dal progetto.</summary>
+        List<string> CpuAddresses()
+        {
+            var result = new List<string>();
+            foreach (DeviceItem item in Ref.Device.DeviceItems) CollectAddresses(item, result);
+            return result;
+        }
+
+        static void CollectAddresses(DeviceItem item, List<string> into)
+        {
+            NetworkInterface ni = null;
+            try { ni = item.GetService<NetworkInterface>(); } catch { }
+            if (ni != null)
+                foreach (Node n in ni.Nodes)
+                {
+                    string a = TiaSession.Attr(n, "Address");
+                    if (!string.IsNullOrEmpty(a) && a.Split('.').Length == 4 && !into.Contains(a)) into.Add(a);
+                }
+            foreach (DeviceItem sub in item.DeviceItems) CollectAddresses(sub, into);
+        }
+
+        static bool SameSubnet(string a, string b)
+        {
+            if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)) return false;
+            string[] x = a.Split('.'), y = b.Split('.');
+            return x.Length == 4 && y.Length == 4 && x[0] == y[0] && x[1] == y[1] && x[2] == y[2];
+        }
+
+        static void Walk(CompareResultElement e, string path, bool includeIdentical, int limit, List<JObj> into,
+                         Dictionary<string, int> counts, ref int listed, ref int total)
+        {
+            if (e == null) return;
+            string name = !string.IsNullOrEmpty(e.LeftName) ? e.LeftName : e.RightName;
+            string here = path.Length == 0 ? (name ?? "") : Join(path, name ?? "");
+            CompareResultState state = e.ComparisonResult;
+            bool folder = e.Elements != null && e.Elements.Count > 0;
+
+            if (!folder && path.Length > 0)
+            {
+                total++;
+                string key = state.ToString();
+                int n; counts.TryGetValue(key, out n); counts[key] = n + 1;
+                bool same = state == CompareResultState.ObjectsIdentical || state == CompareResultState.FolderContentsIdentical ||
+                            state == CompareResultState.CompareIrrelevant;
+                if (includeIdentical || !same)
+                {
+                    listed++;
+                    if (limit <= 0 || into.Count < limit)
+                    {
+                        string detail = null;
+                        try { detail = e.DetailedInformation; } catch { }
+                        into.Add(new JObj()
+                            .Set("object", name)
+                            .Set("path", path)
+                            .Set("state", key)
+                            .Set("project", e.LeftName)
+                            .Set("cpu", e.RightName)
+                            .Set("detail", string.IsNullOrEmpty(detail) ? null : detail));
+                    }
+                }
+            }
+            else if (folder && (state == CompareResultState.FolderContainsDifferencesOwnStateDifferent ||
+                                state == CompareResultState.FolderContentEqualOwnStateDifferent) && path.Length > 0)
+            {
+                // la cartella stessa (es. la CPU, una cartella di blocchi) e diversa: va detto
+                listed++;
+                if (limit <= 0 || into.Count < limit)
+                    into.Add(new JObj().Set("object", name).Set("path", path).Set("state", state.ToString())
+                                       .Set("project", e.LeftName).Set("cpu", e.RightName).Set("folder", true));
+            }
+
+            if (folder)
+                foreach (CompareResultElement child in e.Elements)
+                    Walk(child, here, includeIdentical, limit, into, counts, ref listed, ref total);
         }
 
         // ------------------------------------------------------------------ tag
