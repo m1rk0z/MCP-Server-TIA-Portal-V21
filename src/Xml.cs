@@ -42,6 +42,36 @@ namespace TiaMcp
             return result;
         }
 
+        /// <summary>
+        /// L'oggetto che un export contiene: il primo figlio di Document che non e
+        /// Engineering o DocumentInfo (es. SW.Blocks.FC, SW.Types.PlcStruct,
+        /// SW.Tags.PlcTagTable) e il suo Name. Serve a sapere cosa un import
+        /// andrebbe a sovrascrivere prima di farlo. Chiavi: "element", "name".
+        /// </summary>
+        public static JObj RootObject(string file)
+        {
+            var result = new JObj();
+            var doc = new XmlDocument();
+            doc.Load(file);
+            if (doc.DocumentElement == null) return result;
+
+            foreach (XmlNode node in doc.DocumentElement.ChildNodes)
+            {
+                if (node.NodeType != XmlNodeType.Element) continue;
+                if (node.Name == "Engineering" || node.Name == "DocumentInfo") continue;
+
+                result.Set("element", node.Name);
+                foreach (XmlNode child in node.ChildNodes)
+                {
+                    if (child.Name != "AttributeList") continue;
+                    foreach (XmlNode a in child.ChildNodes)
+                        if (a.Name == "Name") { result.Set("name", a.InnerText); break; }
+                }
+                break;
+            }
+            return result;
+        }
+
         /// <summary>Quante volte compare un frammento. Grezzo di proposito: conta gli oggetti di schermata senza costruire l'albero.</summary>
         public static int CountElements(string file, string fragment)
         {

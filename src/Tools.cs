@@ -584,9 +584,9 @@ namespace TiaMcp
                 };
 
             Add("plc_export_blocks",
-                "Export PLC blocks to XML so their logic can be read. Know-how protected blocks cannot " +
-                "be exported and are reported as such. The PLC side of this server is read-only by " +
-                "design: nothing here writes a block back.")
+                "Export PLC blocks to XML (SimaticML) so their logic can be read, or edited and brought " +
+                "back with plc_import_blocks. Know-how protected blocks cannot be exported and are " +
+                "reported as such.")
                 .Arg("plc", "string", "PLC name.")
                 .Need("out_dir", "string", "Destination folder.")
                 .ArgList("names", "Blocks to export.")
@@ -632,6 +632,140 @@ namespace TiaMcp
                     List<JObj> t = p.Tags(a.Str("contains"), a.Int("limit", 500));
                     return new JObj().Set("plc", p.DeviceName).Set("count", t.Count).Set("tags", t);
                 };
+
+            // ------------------------------------------- PLC: export e import
+            //
+            // Gli import toccano solo il progetto offline. Niente qui scarica o
+            // carica dalla CPU, e niente salva: serve tia_save.
+
+            const string OfflineOnly =
+                " Changes the OFFLINE project only, in memory: nothing is compiled, saved or downloaded to the " +
+                "CPU. Refused while TIA Portal is online with the CPU. Never replaces a know-how protected " +
+                "object or one listed in keep_safe. Stops at the first failure. Afterwards run tia_compile, " +
+                "then tia_save.";
+
+            Add("plc_import_blocks",
+                "Import PLC blocks (OB, FB, FC, DB) from SimaticML XML, as written by plc_export_blocks. " +
+                "A block already in the project is replaced only with overwrite=true, and in the group " +
+                "where it already is. Export the current block first: it is the only way back." + OfflineOnly)
+                .Arg("plc", "string", "PLC or device name. Omit when there is only one.")
+                .ArgList("files", "Paths of the XML files to import.")
+                .Arg("dir", "string", "Instead of 'files': a folder to take the files from.")
+                .Arg("pattern", "string", "Filename pattern inside 'dir'. Default *.xml.")
+                .Arg("overwrite", "boolean", "Replace blocks that already exist (ImportOptions.Override). Default false.")
+                .Arg("group", "string", "Block group for NEW blocks, e.g. 'Motors/Pumps', created if missing. Empty means the root.")
+                .ArgList("keep_safe", "Blocks that must never be touched.")
+                .Writes = true;
+            byName["plc_import_blocks"].Run = delegate(JObj a)
+            {
+                session.RequireAttached();
+                return PickPlc(a).ImportBlocks(FileSet(a), a.Bool("overwrite", false),
+                                               a.Strings("keep_safe"), a.Str("group"));
+            };
+
+            Add("plc_export_sources",
+                "Generate text sources from blocks and PLC data types: .scl for SCL, .awl for STL, .db for " +
+                "data blocks, .udt for data types, one file per object. LAD, FBD and GRAPH blocks have no " +
+                "text source: use plc_export_blocks for those. Does not modify the project.")
+                .Arg("plc", "string", "PLC or device name. Omit when there is only one.")
+                .Need("out_dir", "string", "Destination folder.")
+                .ArgList("names", "Blocks and data types to export.")
+                .Run = delegate(JObj a)
+                {
+                    session.RequireAttached();
+                    return PickPlc(a).ExportSources(a.Str("out_dir"), a.Strings("names"));
+                };
+
+            Add("plc_import_sources",
+                "Add external source files (.scl, .awl, .db, .udt) and generate the blocks and data types " +
+                "they declare. Generation REPLACES objects with the same name, so the server reads the " +
+                "declarations in each file first and refuses the file unless overwrite=true when any of " +
+                "them already exists." + OfflineOnly)
+                .Arg("plc", "string", "PLC or device name. Omit when there is only one.")
+                .ArgList("files", "Paths of the source files.")
+                .Arg("dir", "string", "Instead of 'files': a folder to take the files from. Needs 'pattern'.")
+                .Arg("pattern", "string", "Filename pattern inside 'dir', e.g. *.scl. Required with 'dir'.")
+                .Arg("overwrite", "boolean", "Replace existing blocks, types and the external source of the same name. Default false.")
+                .Arg("keep_source", "boolean", "Keep the external source in the project after generating. Default false.")
+                .ArgList("keep_safe", "Blocks and data types that must never be touched.")
+                .Writes = true;
+            byName["plc_import_sources"].Run = delegate(JObj a)
+            {
+                session.RequireAttached();
+                if (!string.IsNullOrEmpty(a.Str("dir")) && string.IsNullOrEmpty(a.Str("pattern")))
+                    throw new McpError("With 'dir', say which files with 'pattern' (e.g. *.scl).");
+                return PickPlc(a).ImportSources(FileSet(a), a.Bool("overwrite", false),
+                                                a.Strings("keep_safe"), a.Bool("keep_source", false));
+            };
+
+            Add("plc_export_tag_tables", "Export PLC tag tables to XML, one file per table.")
+                .Arg("plc", "string", "PLC or device name. Omit when there is only one.")
+                .Need("out_dir", "string", "Destination folder.")
+                .ArgList("names", "Tables to export; empty means all.")
+                .Run = delegate(JObj a)
+                {
+                    session.RequireAttached();
+                    return PickPlc(a).ExportTagTables(a.Str("out_dir"), a.Strings("names"));
+                };
+
+            Add("plc_import_tag_tables",
+                "Import PLC tag tables from XML, as written by plc_export_tag_tables. An existing table is " +
+                "replaced as a whole only with overwrite=true, in the group where it already is." + OfflineOnly)
+                .Arg("plc", "string", "PLC or device name. Omit when there is only one.")
+                .ArgList("files", "Paths of the XML files to import.")
+                .Arg("dir", "string", "Instead of 'files': a folder to take the files from.")
+                .Arg("pattern", "string", "Filename pattern inside 'dir'. Default *.xml.")
+                .Arg("overwrite", "boolean", "Replace tables that already exist. Default false.")
+                .Arg("group", "string", "Tag table group for NEW tables, created if missing. Empty means the root.")
+                .ArgList("keep_safe", "Tables that must never be touched.")
+                .Writes = true;
+            byName["plc_import_tag_tables"].Run = delegate(JObj a)
+            {
+                session.RequireAttached();
+                return PickPlc(a).ImportTagTables(FileSet(a), a.Bool("overwrite", false),
+                                                  a.Strings("keep_safe"), a.Str("group"));
+            };
+
+            Add("plc_types", "The PLC data types (UDT) with group, consistency and know-how protection.")
+                .Arg("plc", "string", "PLC or device name. Omit when there is only one.")
+                .Arg("contains", "string", "Filter on the name.")
+                .Arg("limit", "integer", "Maximum number of types. Default 500, 0 means no limit.")
+                .Run = delegate(JObj a)
+                {
+                    session.RequireAttached();
+                    Plc p = PickPlc(a);
+                    List<JObj> t = p.Types(a.Str("contains"), a.Int("limit", 500));
+                    return new JObj().Set("plc", p.DeviceName).Set("count", t.Count).Set("types", t);
+                };
+
+            Add("plc_export_types", "Export PLC data types (UDT) to XML, one file per type.")
+                .Arg("plc", "string", "PLC or device name. Omit when there is only one.")
+                .Need("out_dir", "string", "Destination folder.")
+                .ArgList("names", "Types to export; empty means all.")
+                .Run = delegate(JObj a)
+                {
+                    session.RequireAttached();
+                    return PickPlc(a).ExportTypes(a.Str("out_dir"), a.Strings("names"));
+                };
+
+            Add("plc_import_types",
+                "Import PLC data types (UDT) from XML, as written by plc_export_types. Import a type before " +
+                "the blocks that use it. Replacing a type makes every block and DB that uses it " +
+                "inconsistent until the next compile." + OfflineOnly)
+                .Arg("plc", "string", "PLC or device name. Omit when there is only one.")
+                .ArgList("files", "Paths of the XML files to import.")
+                .Arg("dir", "string", "Instead of 'files': a folder to take the files from.")
+                .Arg("pattern", "string", "Filename pattern inside 'dir'. Default *.xml.")
+                .Arg("overwrite", "boolean", "Replace types that already exist. Default false.")
+                .Arg("group", "string", "Type group for NEW types, created if missing. Empty means the root.")
+                .ArgList("keep_safe", "Types that must never be touched.")
+                .Writes = true;
+            byName["plc_import_types"].Run = delegate(JObj a)
+            {
+                session.RequireAttached();
+                return PickPlc(a).ImportTypes(FileSet(a), a.Bool("overwrite", false),
+                                              a.Strings("keep_safe"), a.Str("group"));
+            };
         }
     }
 }

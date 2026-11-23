@@ -1,15 +1,24 @@
-// Plc.cs - lato PLC, in sola lettura.
+// Plc.cs - lato PLC: lettura, export e import nel progetto offline.
 //
 // Il server nasce per il lavoro HMI, e il PLC e il suo contesto: per capire a
 // cosa punta un tag di pannello serve vedere i blocchi e le tabelle di variabili
-// che ci stanno dietro. Qui si legge e si esporta, non si scrive: un blocco
-// sovrascritto per errore e un impianto fermo, e nessun risparmio di tempo lo
-// giustifica. La scrittura PLC resta un lavoro da fare in TIA, con gli occhi
-// sopra.
+// che ci stanno dietro.
+//
+// Gli import (blocchi, sorgenti esterne, tabelle di variabili, tipi di dati)
+// toccano SOLO il progetto offline. Un blocco sovrascritto per errore e un
+// impianto fermo, quindi le regole sono piu strette che sul lato HMI:
+//   - niente sovrascrittura se non e chiesta (overwrite e false di default);
+//   - mai sopra un oggetto protetto da know-how o elencato in keep_safe;
+//   - rifiuto se TIA e online con la CPU;
+//   - ci si ferma al primo errore.
+// Qui non si scarica, non si carica e non si cancella niente dalla CPU, e non
+// si salva: il salvataggio resta tia_save, il download resta un lavoro da fare
+// in TIA con gli occhi sopra.
 
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
 using Siemens.Engineering;
 using Siemens.Engineering.Compare;
 using Siemens.Engineering.HW;
@@ -17,7 +26,9 @@ using Siemens.Engineering.HW.Features;
 using Siemens.Engineering.Online;
 using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
+using Siemens.Engineering.SW.ExternalSources;
 using Siemens.Engineering.SW.Tags;
+using Siemens.Engineering.SW.Types;
 
 namespace TiaMcp
 {
@@ -43,11 +54,12 @@ namespace TiaMcp
         {
             public PlcBlock Block;
             public string Path;
+            public PlcBlockGroup Group;
         }
 
         void Collect(PlcBlockGroup g, string path, List<BlockAt> into)
         {
-            foreach (PlcBlock b in g.Blocks) into.Add(new BlockAt { Block = b, Path = path });
+            foreach (PlcBlock b in g.Blocks) into.Add(new BlockAt { Block = b, Path = path, Group = g });
             foreach (PlcBlockUserGroup sub in g.Groups) Collect(sub, Join(path, sub.Name), into);
         }
 
@@ -463,6 +475,660 @@ namespace TiaMcp
                 CollectTags(sub, Join(path, sub.Name), contains, limit, into);
                 if (limit > 0 && into.Count >= limit) return;
             }
+        }
+
+        // ============================================================== import
+        //
+        // Tutto quello che segue scrive nel progetto offline. Le regole comuni
+        // stanno in ImportXml; ogni tipo di oggetto dice solo dove cercare
+        // l'omonimo e dove creare un oggetto nuovo.
+
+        delegate void Importer(FileInfo file, ImportOptions options);
+
+        class Existing
+        {
+            public string Path;
+            public bool Protected;
+            public Importer Into;
+        }
+
+        static bool Listed(List<string> names, string name)
+        {
+            if (names == null || name == null) return false;
+            foreach (string n in names)
+                if (string.Equals(n, name, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        static List<string> Segments(string path)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrEmpty(path)) return result;
+            foreach (string raw in path.Replace('\\', '/').Split('/'))
+            {
+                string part = raw.Trim();
+                if (part.Length > 0) result.Add(part);
+            }
+            return result;
+        }
+
+        /// <summary>Gli import si fanno solo offline: con la CPU online TIA confronta e segnala, e non e il momento di cambiare il progetto.</summary>
+        void RequireOffline(string tool)
+        {
+            OnlineProvider online = null;
+            try { online = Ref.Item.GetService<OnlineProvider>(); } catch { online = null; }
+            if (online == null) return;
+
+            OnlineState state;
+            try { state = online.State; } catch { return; }
+            if (state != OnlineState.Offline)
+                throw new McpError(tool + " refused: TIA Portal is online with '" + DeviceName + "' (state " + state +
+                                   "). Go offline first; this server only changes the offline project.");
+        }
+
+        /// <summary>
+        /// Import di file XML uno alla volta. prefix e l'inizio del nome dell'elemento
+        /// atteso (SW.Blocks., SW.Types., SW.Tags.PlcTagTable): un file di un altro
+        /// genere viene rifiutato prima di arrivare a TIA.
+        /// </summary>
+        JObj ImportXml(string tool, string what, string prefix, List<string> files, bool overwrite,
+                       List<string> keepSafe, string group, Func<string, Existing> find,
+                       Func<Importer> destination, Action<JObj> annotate)
+        {
+            if (files == null || files.Count == 0) throw new McpError("No files to import.");
+            RequireOffline(tool);
+
+            ImportOptions opt = overwrite ? ImportOptions.Override : ImportOptions.None;
+            var ok = new List<JObj>();
+            var refused = new List<JObj>();
+            var errors = new List<JObj>();
+            bool stopped = false;
+            Importer fresh = null;
+            string freshPath = string.Join("/", Segments(group).ToArray());
+
+            foreach (string file in files)
+            {
+                if (!File.Exists(file))
+                {
+                    errors.Add(new JObj().Set("file", file).Set("error", "file not found"));
+                    continue;
+                }
+
+                string element, name;
+                try
+                {
+                    JObj root = Xml.RootObject(file);
+                    element = root.Str("element");
+                    name = root.Str("name");
+                }
+                catch (Exception ex)
+                {
+                    errors.Add(new JObj().Set("file", file).Set("error", "not a readable XML: " + Flat(ex)));
+                    continue;
+                }
+
+                if (element == null || !element.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    refused.Add(new JObj().Set("file", file)
+                        .Set("why", "not a " + what + " export (found " + (element ?? "nothing") + ")"));
+                    continue;
+                }
+                if (string.IsNullOrEmpty(name))
+                {
+                    refused.Add(new JObj().Set("file", file)
+                        .Set("why", "cannot read the object name from the XML, so cannot tell what it would overwrite"));
+                    continue;
+                }
+                if (Listed(keepSafe, name))
+                {
+                    refused.Add(new JObj().Set("file", file).Set("name", name).Set("why", "protected: listed in keep_safe"));
+                    continue;
+                }
+
+                // si ricerca a ogni file: l'import precedente ha cambiato l'albero
+                Existing existing = find(name);
+                Importer into;
+                string where;
+                if (existing != null)
+                {
+                    if (existing.Protected)
+                    {
+                        refused.Add(new JObj().Set("file", file).Set("name", name)
+                            .Set("why", "the " + what + " in the project is know-how protected"));
+                        continue;
+                    }
+                    if (!overwrite)
+                    {
+                        refused.Add(new JObj().Set("file", file).Set("name", name)
+                            .Set("why", "already in the project (group '" + (existing.Path.Length == 0 ? "/" : existing.Path) +
+                                        "'): pass overwrite=true to replace it"));
+                        continue;
+                    }
+                    // l'Override distrugge l'oggetto vecchio: si reimporta dove stava
+                    into = existing.Into;
+                    where = existing.Path;
+                }
+                else
+                {
+                    if (fresh == null) fresh = destination();
+                    into = fresh;
+                    where = freshPath;
+                }
+
+                try
+                {
+                    into(new FileInfo(file), opt);
+                    ok.Add(new JObj().Set("name", name).Set("type", element.Substring(element.LastIndexOf('.') + 1))
+                        .Set("group", where.Length == 0 ? "/" : where)
+                        .Set("replaced", existing != null).Set("file", file));
+                }
+                catch (Exception ex)
+                {
+                    errors.Add(new JObj().Set("file", file).Set("name", name).Set("error", Flat(ex)));
+                    // un import rifiutato puo abbattere la sessione Openness:
+                    // meglio fermarsi e riferire, che tentare i file successivi
+                    stopped = true;
+                    break;
+                }
+            }
+
+            if (annotate != null)
+                foreach (JObj o in ok) { try { annotate(o); } catch { } }
+
+            return new JObj()
+                .Set("plc", DeviceName)
+                .Set("imported", ok.Count)
+                .Set("refused", refused.Count)
+                .Set("failed", errors.Count)
+                .Set("mode", overwrite ? "Override" : "None")
+                .Set("stopped_on_first_error", stopped)
+                .Set("objects", ok)
+                .Set("refusals", refused)
+                .Set("errors", errors)
+                .Set("note", ok.Count == 0 ? null :
+                    "Offline project only, in memory: nothing was compiled, saved or downloaded. " +
+                    "Run tia_compile, check the result, then tia_save. The download to the CPU is done by hand in TIA Portal.");
+        }
+
+        // ------------------------------------------------------ import blocchi
+
+        BlockAt FindBlock(string name)
+        {
+            var all = new List<BlockAt>();
+            Collect(sw.BlockGroup, "", all);
+            foreach (BlockAt b in all)
+                if (string.Equals(b.Block.Name, name, StringComparison.OrdinalIgnoreCase)) return b;
+            return null;
+        }
+
+        PlcBlockGroup BlockGroupAt(string path)
+        {
+            PlcBlockGroup current = sw.BlockGroup;
+            foreach (string part in Segments(path))
+            {
+                PlcBlockUserGroup next = null;
+                foreach (PlcBlockUserGroup g in current.Groups)
+                    if (string.Equals(g.Name, part, StringComparison.OrdinalIgnoreCase)) { next = g; break; }
+                if (next == null) next = current.Groups.Create(part);
+                current = next;
+            }
+            return current;
+        }
+
+        public JObj ImportBlocks(List<string> files, bool overwrite, List<string> keepSafe, string group)
+        {
+            return ImportXml("plc_import_blocks", "block", "SW.Blocks.", files, overwrite, keepSafe, group,
+                delegate(string name)
+                {
+                    BlockAt b = FindBlock(name);
+                    if (b == null) return null;
+                    PlcBlockComposition blocks = b.Group.Blocks;
+                    return new Existing
+                    {
+                        Path = b.Path,
+                        Protected = b.Block.IsKnowHowProtected,
+                        Into = delegate(FileInfo f, ImportOptions o) { blocks.Import(f, o); }
+                    };
+                },
+                delegate
+                {
+                    PlcBlockComposition blocks = BlockGroupAt(group).Blocks;
+                    return delegate(FileInfo f, ImportOptions o) { blocks.Import(f, o); };
+                },
+                delegate(JObj o)
+                {
+                    BlockAt b = FindBlock(o.Str("name"));
+                    if (b == null) return;
+                    o.Set("number", b.Block.Number).Set("consistent", b.Block.IsConsistent);
+                });
+        }
+
+        // ------------------------------------------------------ sorgenti esterne
+
+        static string SourceExtension(string language)
+        {
+            switch ((language ?? "").ToUpperInvariant())
+            {
+                case "SCL": return ".scl";
+                case "STL": return ".awl";
+                case "DB": return ".db";
+                default: return null;
+            }
+        }
+
+        /// <summary>Sorgente di testo generata da TIA (SCL, AWL, DB, UDT): un file per oggetto. Non modifica il progetto.</summary>
+        public JObj ExportSources(string outDir, List<string> names)
+        {
+            if (names == null || names.Count == 0) throw new McpError("Name at least one block or data type.");
+            if (string.IsNullOrEmpty(outDir)) throw new McpError("Missing out_dir.");
+            if (!Directory.Exists(outDir)) Directory.CreateDirectory(outDir);
+
+            var files = new List<JObj>();
+            var errors = new List<JObj>();
+            var missing = new List<string>();
+
+            foreach (string wanted in names)
+            {
+                BlockAt b = FindBlock(wanted);
+                TypeAt t = b == null ? FindType(wanted) : null;
+                if (b == null && t == null) { missing.Add(wanted); continue; }
+
+                string name = b != null ? b.Block.Name : t.Type.Name;
+                try
+                {
+                    string file;
+                    if (b != null)
+                    {
+                        if (b.Block.IsKnowHowProtected) throw new McpError("know-how protected: no source can be generated");
+                        string language = b.Block.ProgrammingLanguage.ToString();
+                        string ext = SourceExtension(language);
+                        if (ext == null)
+                            throw new McpError("language " + language + " has no text source: use plc_export_blocks (XML)");
+                        file = Path.Combine(outDir, Sanitize(name) + ext);
+                        if (File.Exists(file)) File.Delete(file);
+                        sw.ExternalSourceGroup.GenerateSource(new List<PlcBlock> { b.Block }, new FileInfo(file));
+                        files.Add(new JObj().Set("name", name).Set("kind", b.Block.GetType().Name)
+                            .Set("language", language).Set("file", file));
+                    }
+                    else
+                    {
+                        file = Path.Combine(outDir, Sanitize(name) + ".udt");
+                        if (File.Exists(file)) File.Delete(file);
+                        sw.ExternalSourceGroup.GenerateSource(new List<PlcType> { t.Type }, new FileInfo(file));
+                        files.Add(new JObj().Set("name", name).Set("kind", "PlcType").Set("file", file));
+                    }
+                }
+                catch (Exception ex) { errors.Add(new JObj().Set("name", name).Set("error", Flat(ex))); }
+            }
+
+            return new JObj()
+                .Set("exported", files.Count)
+                .Set("failed", errors.Count)
+                .Set("not_found", missing)
+                .Set("out_dir", outDir)
+                .Set("files", files)
+                .Set("errors", errors);
+        }
+
+        static readonly Regex Declaration = new Regex(
+            "^\\s*(FUNCTION_BLOCK|FUNCTION|DATA_BLOCK|ORGANIZATION_BLOCK|TYPE)\\s+(?:\"([^\"]+)\"|([^\\s:;]+))",
+            RegexOptions.IgnoreCase | RegexOptions.Multiline);
+
+        /// <summary>I nomi dei blocchi e dei tipi che una sorgente dichiara: sono quelli che la generazione creerebbe o sovrascriverebbe.</summary>
+        static List<string> Declared(string text)
+        {
+            var result = new List<string>();
+            foreach (Match m in Declaration.Matches(text))
+            {
+                string name = m.Groups[2].Success ? m.Groups[2].Value : m.Groups[3].Value;
+                if (name.Length > 0 && !result.Contains(name)) result.Add(name);
+            }
+            return result;
+        }
+
+        PlcExternalSource FindSource(string name)
+        {
+            foreach (PlcExternalSource s in sw.ExternalSourceGroup.ExternalSources)
+                if (string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)) return s;
+            return null;
+        }
+
+        public JObj ImportSources(List<string> files, bool overwrite, List<string> keepSafe, bool keepSource)
+        {
+            if (files == null || files.Count == 0) throw new McpError("No files to import.");
+            RequireOffline("plc_import_sources");
+
+            var ok = new List<JObj>();
+            var refused = new List<JObj>();
+            var errors = new List<JObj>();
+            bool stopped = false;
+
+            foreach (string file in files)
+            {
+                if (!File.Exists(file))
+                {
+                    errors.Add(new JObj().Set("file", file).Set("error", "file not found"));
+                    continue;
+                }
+                string ext = (Path.GetExtension(file) ?? "").ToLowerInvariant();
+                if (ext != ".scl" && ext != ".awl" && ext != ".db" && ext != ".udt")
+                {
+                    refused.Add(new JObj().Set("file", file).Set("why", "not a source file (.scl, .awl, .db, .udt)"));
+                    continue;
+                }
+
+                List<string> declared = Declared(File.ReadAllText(file));
+                if (declared.Count == 0)
+                {
+                    refused.Add(new JObj().Set("file", file)
+                        .Set("why", "no block or type declaration found, so cannot tell what it would overwrite"));
+                    continue;
+                }
+
+                // cosa verrebbe sovrascritto: la generazione sostituisce senza chiedere
+                string why = null;
+                var replaces = new List<string>();
+                foreach (string name in declared)
+                {
+                    if (Listed(keepSafe, name)) { why = "'" + name + "' is protected: listed in keep_safe"; break; }
+                    BlockAt b = FindBlock(name);
+                    TypeAt t = b == null ? FindType(name) : null;
+                    if (b == null && t == null) continue;
+                    if (b != null ? b.Block.IsKnowHowProtected : t.Protected)
+                    {
+                        why = "'" + name + "' in the project is know-how protected";
+                        break;
+                    }
+                    if (!overwrite) { why = "'" + name + "' is already in the project: pass overwrite=true to replace it"; break; }
+                    replaces.Add(name);
+                }
+
+                string sourceName = Path.GetFileName(file);
+                PlcExternalSource old = why == null ? FindSource(sourceName) : null;
+                if (old != null && !overwrite)
+                    why = "an external source named '" + sourceName + "' is already in the project: pass overwrite=true to replace it";
+
+                if (why != null)
+                {
+                    refused.Add(new JObj().Set("file", file).Set("declares", declared).Set("why", why));
+                    continue;
+                }
+
+                PlcExternalSource source = null;
+                try
+                {
+                    if (old != null) old.Delete();
+                    source = sw.ExternalSourceGroup.ExternalSources.CreateFromFile(sourceName, file);
+                    source.GenerateBlocksFromSource();
+                    ok.Add(new JObj().Set("file", file).Set("generated", declared).Set("replaced", replaces)
+                        .Set("source_kept", keepSource));
+                }
+                catch (Exception ex)
+                {
+                    errors.Add(new JObj().Set("file", file).Set("declares", declared).Set("error", Flat(ex)));
+                    stopped = true;
+                }
+                finally
+                {
+                    if (source != null && !keepSource) { try { source.Delete(); } catch { } }
+                }
+                if (stopped) break;
+            }
+
+            foreach (JObj o in ok)
+            {
+                var state = new List<JObj>();
+                foreach (string name in (List<string>)o.Get("generated"))
+                {
+                    BlockAt b = FindBlock(name);
+                    if (b != null)
+                        state.Add(new JObj().Set("name", b.Block.Name).Set("type", b.Block.GetType().Name)
+                            .Set("number", b.Block.Number).Set("consistent", b.Block.IsConsistent));
+                    else if (FindType(name) != null)
+                        state.Add(new JObj().Set("name", name).Set("type", "PlcType"));
+                    else
+                        state.Add(new JObj().Set("name", name).Set("missing", true));
+                }
+                o.Set("objects", state);
+            }
+
+            return new JObj()
+                .Set("plc", DeviceName)
+                .Set("imported", ok.Count)
+                .Set("refused", refused.Count)
+                .Set("failed", errors.Count)
+                .Set("overwrite", overwrite)
+                .Set("stopped_on_first_error", stopped)
+                .Set("sources", ok)
+                .Set("refusals", refused)
+                .Set("errors", errors)
+                .Set("note", ok.Count == 0 ? null :
+                    "Offline project only, in memory: nothing was compiled, saved or downloaded. " +
+                    "Run tia_compile, check the result, then tia_save. The download to the CPU is done by hand in TIA Portal.");
+        }
+
+        // ------------------------------------------------- tabelle di variabili
+
+        class TableAt
+        {
+            public PlcTagTable Table;
+            public string Path;
+            public PlcTagTableGroup Group;
+        }
+
+        void CollectTableObjects(PlcTagTableGroup g, string path, List<TableAt> into)
+        {
+            foreach (PlcTagTable t in g.TagTables) into.Add(new TableAt { Table = t, Path = path, Group = g });
+            foreach (PlcTagTableUserGroup sub in g.Groups) CollectTableObjects(sub, Join(path, sub.Name), into);
+        }
+
+        PlcTagTableGroup TagTableGroupAt(string path)
+        {
+            PlcTagTableGroup current = sw.TagTableGroup;
+            foreach (string part in Segments(path))
+            {
+                PlcTagTableUserGroup next = null;
+                foreach (PlcTagTableUserGroup g in current.Groups)
+                    if (string.Equals(g.Name, part, StringComparison.OrdinalIgnoreCase)) { next = g; break; }
+                if (next == null) next = current.Groups.Create(part);
+                current = next;
+            }
+            return current;
+        }
+
+        public JObj ExportTagTables(string outDir, List<string> names)
+        {
+            if (string.IsNullOrEmpty(outDir)) throw new McpError("Missing out_dir.");
+            if (!Directory.Exists(outDir)) Directory.CreateDirectory(outDir);
+
+            var all = new List<TableAt>();
+            CollectTableObjects(sw.TagTableGroup, "", all);
+
+            var files = new List<JObj>();
+            var errors = new List<JObj>();
+            var missing = names == null ? new List<string>() : new List<string>(names);
+
+            foreach (TableAt t in all)
+            {
+                string tn = t.Table.Name;
+                if (names != null && names.Count > 0 && !Listed(names, tn)) continue;
+                missing.RemoveAll(delegate(string x) { return string.Equals(x, tn, StringComparison.OrdinalIgnoreCase); });
+
+                string file = Path.Combine(outDir, Sanitize(tn) + ".xml");
+                try
+                {
+                    if (File.Exists(file)) File.Delete(file);
+                    t.Table.Export(new FileInfo(file), ExportOptions.WithDefaults);
+                    files.Add(new JObj().Set("table", tn).Set("group", t.Path.Length == 0 ? "/" : t.Path).Set("file", file));
+                }
+                catch (Exception ex) { errors.Add(new JObj().Set("table", tn).Set("error", Flat(ex))); }
+            }
+
+            return new JObj()
+                .Set("exported", files.Count)
+                .Set("failed", errors.Count)
+                .Set("not_found", missing)
+                .Set("out_dir", outDir)
+                .Set("files", files)
+                .Set("errors", errors);
+        }
+
+        public JObj ImportTagTables(List<string> files, bool overwrite, List<string> keepSafe, string group)
+        {
+            return ImportXml("plc_import_tag_tables", "PLC tag table", "SW.Tags.PlcTagTable", files, overwrite, keepSafe, group,
+                delegate(string name)
+                {
+                    var all = new List<TableAt>();
+                    CollectTableObjects(sw.TagTableGroup, "", all);
+                    foreach (TableAt t in all)
+                    {
+                        if (!string.Equals(t.Table.Name, name, StringComparison.OrdinalIgnoreCase)) continue;
+                        PlcTagTableComposition tables = t.Group.TagTables;
+                        return new Existing
+                        {
+                            Path = t.Path,
+                            Protected = false,
+                            Into = delegate(FileInfo f, ImportOptions o) { tables.Import(f, o); }
+                        };
+                    }
+                    return null;
+                },
+                delegate
+                {
+                    PlcTagTableComposition tables = TagTableGroupAt(group).TagTables;
+                    return delegate(FileInfo f, ImportOptions o) { tables.Import(f, o); };
+                },
+                null);
+        }
+
+        // ------------------------------------------------------- tipi di dati
+
+        class TypeAt
+        {
+            public PlcType Type;
+            public string Path;
+            public PlcTypeGroup Group;
+            public bool Protected { get { return TiaSession.Attr(Type, "IsKnowHowProtected") == "True"; } }
+        }
+
+        void CollectTypes(PlcTypeGroup g, string path, List<TypeAt> into)
+        {
+            foreach (PlcType t in g.Types) into.Add(new TypeAt { Type = t, Path = path, Group = g });
+            foreach (PlcTypeUserGroup sub in g.Groups) CollectTypes(sub, Join(path, sub.Name), into);
+        }
+
+        TypeAt FindType(string name)
+        {
+            var all = new List<TypeAt>();
+            CollectTypes(sw.TypeGroup, "", all);
+            foreach (TypeAt t in all)
+                if (string.Equals(t.Type.Name, name, StringComparison.OrdinalIgnoreCase)) return t;
+            return null;
+        }
+
+        PlcTypeGroup TypeGroupAt(string path)
+        {
+            PlcTypeGroup current = sw.TypeGroup;
+            foreach (string part in Segments(path))
+            {
+                PlcTypeUserGroup next = null;
+                foreach (PlcTypeUserGroup g in current.Groups)
+                    if (string.Equals(g.Name, part, StringComparison.OrdinalIgnoreCase)) { next = g; break; }
+                if (next == null) next = current.Groups.Create(part);
+                current = next;
+            }
+            return current;
+        }
+
+        public List<JObj> Types(string contains, int limit)
+        {
+            var all = new List<TypeAt>();
+            CollectTypes(sw.TypeGroup, "", all);
+
+            var result = new List<JObj>();
+            foreach (TypeAt t in all)
+            {
+                if (contains != null && contains.Length > 0 &&
+                    t.Type.Name.IndexOf(contains, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                result.Add(new JObj()
+                    .Set("name", t.Type.Name)
+                    .Set("group", t.Path.Length == 0 ? "/" : t.Path)
+                    .Set("consistent", TiaSession.Attr(t.Type, "IsConsistent"))
+                    .Set("know_how_protected", t.Protected)
+                    .Set("modified", TiaSession.Attr(t.Type, "ModifiedDate")));
+                if (limit > 0 && result.Count >= limit) break;
+            }
+            return result;
+        }
+
+        public JObj ExportTypes(string outDir, List<string> names)
+        {
+            if (string.IsNullOrEmpty(outDir)) throw new McpError("Missing out_dir.");
+            if (!Directory.Exists(outDir)) Directory.CreateDirectory(outDir);
+
+            var all = new List<TypeAt>();
+            CollectTypes(sw.TypeGroup, "", all);
+
+            var files = new List<JObj>();
+            var errors = new List<JObj>();
+            var missing = names == null ? new List<string>() : new List<string>(names);
+
+            foreach (TypeAt t in all)
+            {
+                string tn = t.Type.Name;
+                if (names != null && names.Count > 0 && !Listed(names, tn)) continue;
+                missing.RemoveAll(delegate(string x) { return string.Equals(x, tn, StringComparison.OrdinalIgnoreCase); });
+
+                if (t.Protected)
+                {
+                    errors.Add(new JObj().Set("name", tn).Set("error", "know-how protected: cannot be exported"));
+                    continue;
+                }
+
+                string file = Path.Combine(outDir, Sanitize(tn) + ".xml");
+                try
+                {
+                    if (File.Exists(file)) File.Delete(file);
+                    t.Type.Export(new FileInfo(file), ExportOptions.WithDefaults);
+                    files.Add(new JObj().Set("name", tn).Set("group", t.Path.Length == 0 ? "/" : t.Path).Set("file", file));
+                }
+                catch (Exception ex) { errors.Add(new JObj().Set("name", tn).Set("error", Flat(ex))); }
+            }
+
+            return new JObj()
+                .Set("exported", files.Count)
+                .Set("failed", errors.Count)
+                .Set("not_found", missing)
+                .Set("out_dir", outDir)
+                .Set("files", files)
+                .Set("errors", errors);
+        }
+
+        public JObj ImportTypes(List<string> files, bool overwrite, List<string> keepSafe, string group)
+        {
+            return ImportXml("plc_import_types", "PLC data type", "SW.Types.", files, overwrite, keepSafe, group,
+                delegate(string name)
+                {
+                    TypeAt t = FindType(name);
+                    if (t == null) return null;
+                    PlcTypeComposition types = t.Group.Types;
+                    return new Existing
+                    {
+                        Path = t.Path,
+                        Protected = t.Protected,
+                        Into = delegate(FileInfo f, ImportOptions o) { types.Import(f, o); }
+                    };
+                },
+                delegate
+                {
+                    PlcTypeComposition types = TypeGroupAt(group).Types;
+                    return delegate(FileInfo f, ImportOptions o) { types.Import(f, o); };
+                },
+                delegate(JObj o)
+                {
+                    TypeAt t = FindType(o.Str("name"));
+                    if (t != null) o.Set("consistent", TiaSession.Attr(t.Type, "IsConsistent"));
+                });
         }
 
         static string Flat(Exception ex)

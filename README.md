@@ -154,7 +154,7 @@ the VM and point Claude Code at **TiaMcpClient** on the PC:
 PC: Claude Code -> TiaMcpClient --agent http://VM:8766 --version V21 --HTTP+token--> VM: TiaAgent -> V21\TiaMcpServer -> TIA Portal
 ```
 
-Same 35 tools, same single confirmation (on the VM desktop, once per Claude Code
+Same 44 tools, same single confirmation (on the VM desktop, once per Claude Code
 session). Files are handled for you: imports given as PC paths are uploaded,
 exports land in `out_dir` on the PC. `setup.cmd` installs the agent with a token,
 an optional client IP allow-list and a read-only switch enforced on the VM.
@@ -205,15 +205,20 @@ skipped, with the skip reported.
 take the whole TIA Portal process down. The server reports what it managed to
 do and stops rather than pushing the remaining files into a dying session.
 
-**The PLC side is read-only by design.** You can list blocks, read their
-properties and export them to XML; nothing writes a block back. A PLC block
-overwritten by mistake is a plant standing still.
+**The PLC side writes to the offline project only, and under stricter rules.**
+Blocks, external sources (SCL, STL, DB, UDT), tag tables and data types can be
+imported, but a PLC block overwritten by mistake is a plant standing still, so:
+`overwrite` is off unless you ask for it; a know-how protected object or one
+listed in `keep_safe` is never replaced; every import is refused while TIA
+Portal is online with the CPU; and the batch stops at the first failure.
+Nothing downloads to, uploads from, starts, stops or deletes anything on a CPU:
+that stays a job for a person at TIA Portal.
 
 Nothing is ever saved implicitly: changes live in memory until `tia_save`.
 
 ## Tools
 
-35 tools. Full reference in [docs/TOOLS.md](docs/TOOLS.md).
+44 tools. Full reference in [docs/TOOLS.md](docs/TOOLS.md).
 
 **Session** — `tia_instances` `tia_attach` `tia_open_project` `tia_session`
 `tia_detach` `tia_save` `tia_compile`
@@ -230,8 +235,12 @@ Nothing is ever saved implicitly: changes live in memory until `tia_save`.
 **HMI, Unified only** — `hmi_create_screen` `hmi_screen_items`
 `hmi_create_screen_item` `hmi_item_types`
 
-**PLC, read-only** — `plc_list` `plc_blocks` `plc_export_blocks`
-`plc_compare_online` `plc_tag_tables` `plc_tags`
+**PLC, read** — `plc_list` `plc_blocks` `plc_export_blocks`
+`plc_export_sources` `plc_compare_online` `plc_tag_tables` `plc_tags`
+`plc_export_tag_tables` `plc_types` `plc_export_types`
+
+**PLC, offline project import** — `plc_import_blocks` `plc_import_sources`
+`plc_import_tag_tables` `plc_import_types`
 
 ### `tia_browse` — the escape hatch
 

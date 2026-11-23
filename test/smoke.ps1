@@ -28,7 +28,12 @@ $messages = @(
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tia_session","arguments":{}}}',
     '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"tia_instances","arguments":{}}}',
     '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"hmi_item_types","arguments":{"contains":"Rectangle"}}}',
-    '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"hmi_panels","arguments":{}}}'
+    '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"hmi_panels","arguments":{}}}',
+    # gli import PLC scrivono nel progetto: con --read-only devono essere rifiutati prima di tutto il resto
+    '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"plc_import_blocks","arguments":{"files":["nessuno.xml"]}}}',
+    '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"plc_import_sources","arguments":{"files":["nessuno.scl"]}}}',
+    '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"plc_import_tag_tables","arguments":{"files":["nessuno.xml"]}}}',
+    '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"plc_import_types","arguments":{"files":["nessuno.xml"]}}}'
 )
 
 if ($Attach) {
