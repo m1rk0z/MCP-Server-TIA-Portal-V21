@@ -42,6 +42,7 @@ the session; the job of the agent is to not waste that.
 
 ## Safety
 
-- PLC tools are read-only on purpose. Do not work around that with other scripts.
+- PLC imports (`plc_import_*`) change the offline project only. Before using them, follow the
+  `tia-plc-safe-import` skill. Do not reach the CPU with other scripts.
 - Never download to a PLC or panel: that is done by a person from TIA Portal.
 - Before any import into an HMI, use the `tia-hmi-safe-import` skill.

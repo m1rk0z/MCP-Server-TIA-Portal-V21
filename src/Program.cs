@@ -205,6 +205,9 @@ namespace TiaMcp
                      "re-attach between operations, each round trip costs that person another click.\n\n" +
                      "When importing screens, list the hand-built ones in keep_safe. Openness cannot " +
                      "regenerate alarm views or trend views, and an Override import deletes them.\n\n" +
+                     "The plc_import_* tools change the OFFLINE project only and never download to a CPU. " +
+                     "They replace an existing block, type or tag table only with overwrite=true: export " +
+                     "the current object first, and ask the user before overwriting.\n\n" +
                      "Writes are never implicit: changes live in memory until you call tia_save.");
         }
 

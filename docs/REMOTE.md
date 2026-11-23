@@ -31,8 +31,8 @@ Tools that read or write files work on the VM. The client makes that transparent
 
 | argument | tools | what the client does |
 |---|---|---|
-| `files`, `dir` | `hmi_import_screens`, `hmi_import_tags`, `hmi_import_text_lists` | a path that exists on the PC is uploaded to the session folder on the VM and replaced |
-| `out_dir` | `hmi_export_screens`, `hmi_export_tags`, `hmi_export_text_lists`, `plc_export_blocks` | the export goes to the session folder on the VM, then every file is downloaded into `out_dir` on the PC and the paths in the reply are rewritten |
+| `files`, `dir` | `hmi_import_screens`, `hmi_import_tags`, `hmi_import_text_lists`, `plc_import_blocks`, `plc_import_sources`, `plc_import_tag_tables`, `plc_import_types` | a path that exists on the PC is uploaded to the session folder on the VM and replaced |
+| `out_dir` | `hmi_export_screens`, `hmi_export_tags`, `hmi_export_text_lists`, `plc_export_blocks`, `plc_export_sources`, `plc_export_tag_tables`, `plc_export_types` | the export goes to the session folder on the VM, then every file is downloaded into `out_dir` on the PC and the paths in the reply are rewritten |
 
 A path that does not exist on the PC is passed unchanged: it is taken as a VM path (for
 example `tia_open_project` on a project stored on the VM). Relative `out_dir` paths are

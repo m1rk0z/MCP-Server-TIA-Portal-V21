@@ -147,7 +147,7 @@ Quando TIA Portal gira in una VM e Claude Code sul PC, sulla VM si installa
 PC: Claude Code -> TiaMcpClient --agent http://VM:8766 --version V21 --HTTP+token--> VM: TiaAgent -> V21\TiaMcpServer -> TIA Portal
 ```
 
-Stessi 35 tool, stessa conferma unica (sul desktop della VM, una volta per
+Stessi 44 tool, stessa conferma unica (sul desktop della VM, una volta per
 sessione di Claude Code). I file si gestiscono da soli: gli import indicati con
 percorsi del PC vengono caricati, gli export arrivano in `out_dir` sul PC.
 `setup.cmd` installa l'agente con un token, una lista facoltativa degli IP
@@ -201,16 +201,21 @@ l'intero processo di TIA Portal. Il server riferisce quel che era riuscito a far
 e si ferma, invece di spingere i file rimanenti dentro una sessione che sta
 morendo.
 
-**Il lato PLC e in sola lettura per scelta.** Si elencano i blocchi, se ne
-leggono le proprieta, si esportano in XML; niente riscrive un blocco. Un blocco
-sovrascritto per errore e un impianto fermo.
+**Il lato PLC scrive solo nel progetto offline, e con regole piu strette.**
+Si importano blocchi, sorgenti esterne (SCL, AWL, DB, UDT), tabelle di variabili
+e tipi di dati, ma un blocco sovrascritto per errore e un impianto fermo, quindi:
+`overwrite` e spento se non lo si chiede; un oggetto protetto da know-how o
+elencato in `keep_safe` non viene mai sostituito; ogni import e rifiutato mentre
+TIA Portal e online con la CPU; e ci si ferma al primo errore. Niente scarica,
+carica, avvia, arresta o cancella qualcosa su una CPU: resta un lavoro per una
+persona davanti a TIA Portal.
 
 Niente viene mai salvato da solo: le modifiche restano in memoria fino a
 `tia_save`.
 
 ## Strumenti
 
-35 strumenti. Riferimento completo in [docs/TOOLS.md](docs/TOOLS.md), e la
+44 strumenti. Riferimento completo in [docs/TOOLS.md](docs/TOOLS.md), e la
 differenza fra le due famiglie in
 [docs/HMI-FAMILIES.md](docs/HMI-FAMILIES.md).
 
@@ -229,8 +234,12 @@ differenza fra le due famiglie in
 **HMI, solo Unified** — `hmi_create_screen` `hmi_screen_items`
 `hmi_create_screen_item` `hmi_item_types`
 
-**PLC, sola lettura** — `plc_list` `plc_blocks` `plc_export_blocks`
-`plc_compare_online` `plc_tag_tables` `plc_tags`
+**PLC, lettura** — `plc_list` `plc_blocks` `plc_export_blocks`
+`plc_export_sources` `plc_compare_online` `plc_tag_tables` `plc_tags`
+`plc_export_tag_tables` `plc_types` `plc_export_types`
+
+**PLC, import nel progetto offline** — `plc_import_blocks` `plc_import_sources`
+`plc_import_tag_tables` `plc_import_types`
 
 ### `tia_browse`, la via d'uscita
 

@@ -51,6 +51,11 @@ Send 'hmi_alarms'          $p
 Send 'plc_list'            @{}
 Send 'plc_blocks'          @{ limit = 5 }
 Send 'plc_tags'            @{ limit = 5 }
+Send 'plc_types'           @{ limit = 5 }
+Send 'plc_export_tag_tables' @{ out_dir = $OutDir; names = @('__non_esiste__') }
+Send 'plc_export_types'    @{ out_dir = $OutDir; names = @('__non_esiste__') }
+Send 'plc_export_sources'  @{ out_dir = $OutDir; names = @('__non_esiste__') }
+Send 'plc_import_blocks'   @{ files = @('__non_esiste__.xml') }   # deve essere rifiutato: sola lettura
 Send 'tia_browse'          @{ path = '' }
 Send 'tia_browse'          @{ path = 'Devices' }
 Send 'hmi_export_screens'  ($p + @{ out_dir = $OutDir; names = @('__non_esiste__') })
